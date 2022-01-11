@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.anatawa12"
-version = "1.0-SNAPSHOT"
+version = property("version").toString()
 
 repositories {
     mavenCentral()
