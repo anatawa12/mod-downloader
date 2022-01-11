@@ -50,8 +50,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="$(get-version)"
           gh release create "v$(get-version)" \
-            --notes-file "${{ steps.up.outputs.RELEASE_NOTE }}"
+            --notes-file "${{ steps.up.outputs.RELEASE_NOTE }}" \
+            "build/libs/mod-downloader-$VERSION.jar"
       - name: Update To Next Version
         run: |
           VERSION="$(get-version)"
