@@ -128,9 +128,7 @@ private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, m
 }
 
 @Serializable
-data class CFWidgetResponse(val id: Int? = null, val error: String? = null, val download: CFWidgetDownload? = null)
-@Serializable
-data class CFWidgetDownload(val id: Int, val name: String)
+data class CFWidgetResponse(val id: Int? = null, val error: String? = null)
 
 suspend fun downloadMod(
     client: HttpClient,
@@ -144,14 +142,13 @@ suspend fun downloadMod(
         is ModsConfig.CurseMod -> {
             val cfWidgetURL = URLBuilder("https://api.cfwidget.com/")
                 .path("minecraft", "mc-mods", source.slug)
-                .apply { parameters.append("version", info.versionId) }
                 .build()
-            val (projectId, download) = run {
+            val projectId = run {
                 while (true) {
                     logger.log("fetching project id and file info from cfwidget for ${info.id}")
                     val resJson = client.get<String>(cfWidgetURL)
                     val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
-                    if (res.id != null && res.download != null) return@run res.id.toString() to res.download
+                    if (res.id != null) return@run res.id
                     if (res.error != "in_queue")
                         throw IOException("unknown response from cfwidget: ${res.error}")
                     delay(10.seconds.inWholeMilliseconds)
@@ -159,15 +156,13 @@ suspend fun downloadMod(
                 @Suppress("UNREACHABLE_CODE") // compiler bug
                 error("unreachable")
             }
-            if (download.id.toString() != info.versionId)
-                throw UserError("version ${info.versionId} for ${info.id} not found")
             logger.log("fetching download url for ${info.id}")
             val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/")
-                .path("api", "v2", "addon", projectId, "file", download.id.toString(), "download-url")
+                .path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
                 .build()
-            val jarURL = client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8)
-            val jar = client.get<ByteReadChannel>(Url(jarURL))
-            fileName = download.name
+            val jarURL = client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8).let(::Url)
+            val jar = client.get<ByteReadChannel>(jarURL)
+            fileName = jarURL.encodedPath.substringAfterLast('/').decodeURLPart()
             body = jar
         }
         is ModsConfig.URLPattern -> {
