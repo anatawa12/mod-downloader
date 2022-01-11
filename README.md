@@ -54,3 +54,9 @@ You can get more information via the following command.
 ```bash
 java -jar "/path/to/mod-downloader.jar" --new-embed --help
 ```
+
+## Known Problems
+
+- on MacOS, we can't choose files in Desktop ([JDK-8264789])
+
+[JDK-8264789]: https://bugs.openjdk.java.net/browse/JDK-8264789
