@@ -69,7 +69,7 @@ private fun startGuiImpl() {
             linkButtons("Go to issue tracker" to "https://github.com/anatawa12/mod-downloader/issues/new"))
     }
 
-    val panel = DownloaderPanel(File("mods").absoluteFile, embedConfig).also { panel ->
+    val panel = DownloaderPanel(getMCDir().resolve("mods").absoluteFile, embedConfig).also { panel ->
         val optionPane = JOptionPane(null, JOptionPane.PLAIN_MESSAGE, JOptionPane.OK_CANCEL_OPTION)
         optionPane.message = panel
         val dialog = optionPane.createDialog(embedConfig?.windowName ?: "Mod Downloader")
@@ -123,6 +123,17 @@ private fun startGuiImpl() {
     }
 
 
+}
+
+fun getMCDir(): File {
+    val userHomeDir = System.getProperty("user.home", ".")
+    val osType = System.getProperty("os.name").lowercase()
+    val mcDir = ".minecraft"
+    return when {
+        osType.contains("win") && System.getenv("APPDATA") != null -> File(System.getenv("APPDATA"), mcDir)
+        osType.contains("mac") -> File(userHomeDir).resolve("Library").resolve("Application Support").resolve("minecraft")
+        else -> File(userHomeDir, mcDir)
+    }
 }
 
 val EmbedConfiguration.windowName get() = "Mod Downloader for $name"
