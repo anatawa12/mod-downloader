@@ -156,7 +156,7 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
 
     private fun onSelect() {
         val dirChooser = JFileChooser()
-        dirChooser.fileSelectionMode = if (isFile) JFileChooser.DIRECTORIES_ONLY else JFileChooser.FILES_ONLY
+        dirChooser.fileSelectionMode = if (!isFile) JFileChooser.DIRECTORIES_ONLY else JFileChooser.FILES_ONLY
         dirChooser.isFileHidingEnabled = false
         file?.let { initial ->
             dirChooser.ensureFileIsVisible(initial)
