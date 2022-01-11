@@ -46,7 +46,7 @@ jobs:
           git tag "v$VERSION"
 
       - run: |
-          ./gradlew publish publishPlugins
+          ./gradlew build
           git push && git push --tags
       - name: Create New Release
         env:
