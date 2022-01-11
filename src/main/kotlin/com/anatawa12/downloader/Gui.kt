@@ -262,7 +262,10 @@ class DownloadingPanel() : JPanel() {
             isEditable = false
             columns = 50
             rows = 20
-        }.also(::add)
+        }
+        add(JScrollPane(textarea).apply {
+            autoscrolls = true
+        })
     }
 
     fun appendLine(line: String) {
