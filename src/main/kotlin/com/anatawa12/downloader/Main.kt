@@ -109,7 +109,8 @@ fun printVersion(embedConfig: EmbedConfiguration?, command: String = "") {
     } else {
         System.err.println("mod-downloader$command version $version")
     }
-    System.err.println("(c) 2021 anatawa12 and other contributors")
+    System.err.println("Copyright (c) 2021 anatawa12 and other contributors")
+    System.err.println("Published under MIT License. see https://github.com/anatawa12/mod-downloader/blob/master/LICENSE")
     System.err.println("For library information, see --licenses")
 }
 
