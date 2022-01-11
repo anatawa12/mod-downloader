@@ -1,6 +1,8 @@
 name: Publisher
-"on":
+
+on:
   - workflow_dispatch
+
 jobs:
   build:
     environment: deployment
