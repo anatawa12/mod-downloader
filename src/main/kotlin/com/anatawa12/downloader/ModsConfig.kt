@@ -10,7 +10,7 @@ mod <id>
  */
 class ModsConfig(val list: List<ModInfo>) {
     internal class Reader1(private val body: String) {
-        private var line: Int = 1
+        var line: Int = 1
         private var index = 0
 
         fun read(): Int {
@@ -51,7 +51,6 @@ class ModsConfig(val list: List<ModInfo>) {
     }
 
     class Parser(private val fileName: String, body: String) {
-        private var line: Int = 1
         private var kind: TokenKind? = null
         private var text: String? = null
         private val reader1 = Reader1(body)
@@ -130,7 +129,7 @@ class ModsConfig(val list: List<ModInfo>) {
             return text!!
         }
 
-        private fun error(message: String): Nothing = throw ParsingError(message, fileName, line)
+        private fun error(message: String): Nothing = throw ParsingError(message, fileName, reader1.line)
 
         fun parseModsConfig(): ModsConfig = ModsConfig(buildList {
             while (kind() != null) add(parseMod())
