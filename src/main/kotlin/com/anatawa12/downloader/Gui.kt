@@ -183,10 +183,7 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
     }
 
     var file: File?
-        get() {
-            val path = selectedDirText.text
-            return if (path.startsWith("/")) File(path) else null
-        }
+        get() = selectedDirText.text.takeUnless { it.isBlank() }?.let(::File)
         set(value) {
             selectedDirText.text = value?.path.orEmpty()
         }
