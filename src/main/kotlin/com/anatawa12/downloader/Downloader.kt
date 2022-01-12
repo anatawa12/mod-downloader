@@ -14,7 +14,11 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.net.URL
 import java.nio.charset.Charset
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
 import kotlin.time.Duration.Companion.seconds
@@ -57,11 +61,23 @@ private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, m
             val entries = downloadTo.listDirectoryEntries()
             if (entries.isEmpty())
                 throw UserError("$downloadTo is not empty. to remove files in the directory, run with --force")
-            entries.forEach { it.deleteIfExists() }
             downloadedList = emptyList()
         }
         DownloadMode.CLEAN_DOWNLOAD_FORCE -> {
-            downloadTo.listDirectoryEntries().forEach { it.deleteIfExists() }
+            downloadTo.listDirectoryEntries().forEach { entry ->
+                Files.walkFileTree(entry, object : SimpleFileVisitor<Path>() {
+                    override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                        exc?.let { throw it }
+                        dir.deleteExisting()
+                        return FileVisitResult.CONTINUE
+                    }
+
+                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                        file.deleteExisting()
+                        return FileVisitResult.CONTINUE
+                    }
+                })
+            }
             downloadedList = emptyList()
         }
     }
@@ -81,7 +97,7 @@ private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, m
             }
         }
         is ModsFileLocation.InJar,
-        is ModsFileLocation.GlobalURL
+        is ModsFileLocation.GlobalURL,
         -> {
             try {
                 ModsConfig.Parser(config.url.path.substringAfterLast('/'),
