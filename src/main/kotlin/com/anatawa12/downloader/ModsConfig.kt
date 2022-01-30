@@ -139,6 +139,7 @@ class ModsConfig(val list: List<ModInfo>) {
 
         private fun parseMod(): ModInfo {
             var optional = false
+            var side: ModSide? = null
             while (true) {
                 if (kind() != TokenKind.Keyword) error("expected 'mod' or mod modifier")
                 when (text()) {
@@ -150,6 +151,16 @@ class ModsConfig(val list: List<ModInfo>) {
                         if (optional) error("multiple optional")
                         kind = null
                         optional = true
+                    }
+                    "server" -> {
+                        if (side != null) error("multiple server or client")
+                        kind = null
+                        side = ModSide.SERVER
+                    }
+                    "client" -> {
+                        if (side != null) error("multiple server or client")
+                        kind = null
+                        side = ModSide.CLIENT
                     }
                     else -> error("unknown mod modifier: $text")
                 }
@@ -181,7 +192,7 @@ class ModsConfig(val list: List<ModInfo>) {
             }
             if (source == null) error("expected 'from'")
             if (versionId == null) error("expected 'version'")
-            return ModInfo(id, source, versionId, versionName, optional)
+            return ModInfo(id, source, versionId, versionName, optional, side)
         }
 
         private fun parseCurseModSource(): CurseMod = CurseMod(getKeywordOrQuotedAndMove())
@@ -207,7 +218,13 @@ class ModsConfig(val list: List<ModInfo>) {
         val versionId: String,
         val versionName: String?,
         val optional: Boolean = false,
+        val modSide: ModSide? = null,
     )
+
+    enum class ModSide {
+        SERVER,
+        CLIENT,
+    }
 
     sealed class ModSource
     data class CurseMod(val slug: String) : ModSource()

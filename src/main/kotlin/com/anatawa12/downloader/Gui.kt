@@ -114,6 +114,7 @@ private suspend fun startGuiImpl() {
             mode = mode, 
             logger = progressPanel::appendLine,
             optionalModsList = panel.modList.optionalModsList,
+            downloadFor = panel.modList.modSide,
         )
         doDownload(modsConfig, params)
         JOptionPane.showMessageDialog(null, "Download Complete", "Complete", JOptionPane.INFORMATION_MESSAGE)
@@ -271,8 +272,10 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
     private val modsListPanel: JPanel
     private val modsListToggle: JButton?
     private val tableModelImpl: TableModelImpl
+    private val serverClient: ButtonGroup
     var modsConfig: ModsConfig? = null
     val optionalModsList get() = tableModelImpl.optionalModsList
+    val modSide get() = enumValueOf<ModsConfig.ModSide>(serverClient.selection.actionCommand)
 
     init {
         if (embedConfig != null) {
@@ -298,6 +301,14 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         configFile?.let(::add)
         modsListToggle?.also { add(fullSized(it)) }
+
+        JPanel().apply {
+            serverClient = ButtonGroup()
+            fun button(mode: ModsConfig.ModSide, text: String, selected: Boolean = false) =
+                JRadioButton(text, selected).apply { actionCommand = mode.name }
+            button(ModsConfig.ModSide.CLIENT, "Client", true).also(serverClient::add).also(::add)
+            button(ModsConfig.ModSide.SERVER, "Server").also(serverClient::add).also(::add)
+        }.also { add(fullSized(it)) }
 
         modsListPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
