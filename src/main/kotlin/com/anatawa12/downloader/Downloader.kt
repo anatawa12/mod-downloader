@@ -23,27 +23,33 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
 import kotlin.time.Duration.Companion.seconds
 
+class DownloadParameters(
+    val downloadTo: File,
+    val mode: DownloadMode,
+    val logger: Logger,
+    val optionalModsList: Set<String>,
+)
 
-fun doDownload(config: ModsFileLocation, downloadTo: File, mode: DownloadMode, logger: Logger) =
-    runBlocking(Dispatchers.Default) { doDownloadImpl(config, downloadTo.toPath(), mode, logger) }
+suspend fun doDownload(config: ModsFileLocation, params: DownloadParameters) =
+    doDownloadImpl(config, params, ::loadModsConfig)
+
+suspend fun doDownload(config: ModsConfig, params: DownloadParameters) =
+    doDownloadImpl(config, params) { it }
 
 val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
-private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, mode: DownloadMode, logger: Logger) {
-    logger.log("config: $config")
-    logger.log("downloadTo: $downloadTo")
-    logger.log("mode: $mode")
+private const val DOWNLOADED_TXT = "downloaded.txt"
 
+private fun checkDownloadToDir(downloadTo: Path, mode: DownloadMode, logger: Logger): List<DownloadedMod> {
     downloadTo.createDirectories()
     if (!downloadTo.isDirectory()) throw UserError("$downloadTo is not directory. may be a file")
 
-    val downloadedText = downloadTo.resolve("downloaded.txt")
     val downloadedList: List<DownloadedMod>
 
     when (mode) {
         DownloadMode.DOWNLOAD -> {
             // nothing to do as prepare
-            val downloadedListStr = runCatching { downloadedText.readText() }.getOrNull()
+            val downloadedListStr = runCatching { downloadTo.resolve(DOWNLOADED_TXT).readText() }.getOrNull()
             downloadedList = if (downloadedListStr == null) emptyList() else {
                 val parsed = DownloadedMod.parse(downloadedListStr)
                 parsed.filter {
@@ -86,7 +92,11 @@ private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, m
     for (downloadedMod in downloadedList)
         logger.log("  $downloadedMod")
 
-    val modsConfig = when (config) {
+    return downloadedList
+}
+
+suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
+    return when (config) {
         is ModsFileLocation.FileSystem -> {
             try {
                 ModsConfig.Parser(config.path.name,
@@ -108,21 +118,20 @@ private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, m
             }
         }
     }
+}
 
-    val (updated, removed, keep) = computeModDiff(modsConfig, downloadedList)
-
-    logger.log("mods to be downloaded: ${updated.size} mod(s)")
-    logger.log("mods to be removed: ${removed.size} mod(s)")
-    logger.log("mods to be keep: ${keep.size} mod(s)")
-
+private fun deleteAll(removed: List<DownloadedMod>, downloadTo: Path) {
     if (removed.isNotEmpty()) {
         for (downloadedMod in removed) {
             downloadTo.resolve(downloadedMod.fileName).deleteIfExists()
         }
     }
+}
 
+private suspend fun download(updated: List<ModsConfig.ModInfo>, downloadTo: Path, logger: Logger): List<DownloadedMod> {
+    if (updated.isEmpty()) return emptyList()
 
-    val downloadedUpdated = if (updated.isEmpty()) emptyList() else coroutineScope {
+    return coroutineScope {
         val completeCount = AtomicInteger(0)
         val client = HttpClient(CIO)
         val updatedCount = updated.size
@@ -138,8 +147,38 @@ private suspend fun doDownloadImpl(config: ModsFileLocation, downloadTo: Path, m
             }
         }.awaitAll()
     }
+}
 
-    downloadedText.toFile().writeChannel()
+private suspend fun <A> doDownloadImpl(
+    config: A,
+    params: DownloadParameters,
+    load: suspend (A) -> ModsConfig,
+) {
+    val downloadTo = params.downloadTo.toPath()
+    val mode = params.mode
+    val logger = params.logger
+    logger.log("config: $config")
+    logger.log("downloadTo: $downloadTo")
+    logger.log("mode: $mode")
+
+    val downloadedList = checkDownloadToDir(downloadTo, mode, logger)
+
+    val modsConfig = load(config)
+
+    val (updated, removed, keep) = computeModDiff(
+        filterOptionalMods(modsConfig.list, params.optionalModsList), 
+        downloadedList,
+    )
+
+    logger.log("mods to be downloaded: ${updated.size} mod(s)")
+    logger.log("mods to be removed: ${removed.size} mod(s)")
+    logger.log("mods to be keep: ${keep.size} mod(s)")
+
+    deleteAll(removed, downloadTo)
+
+    val downloadedUpdated = download(updated, downloadTo, logger)
+
+    downloadTo.resolve(DOWNLOADED_TXT).toFile().writeChannel()
         .writeFully(DownloadedMod.write(downloadedUpdated + keep).toByteArray())
 }
 
@@ -208,14 +247,27 @@ suspend fun downloadMod(
     return DownloadedMod(info.id, info.versionId, fileName)
 }
 
-private fun computeModDiff(mods: ModsConfig, downloadedMods: List<DownloadedMod>): Triple<List<ModsConfig.ModInfo>, List<DownloadedMod>, List<DownloadedMod>> {
+private fun filterOptionalMods(mods: List<ModsConfig.ModInfo>, optionalModsList: Set<String>): List<ModsConfig.ModInfo> {
+    val optionalMods = optionalModsList.toMutableSet()
+    val filtered = mods.filter { mod ->
+        !mod.optional || optionalMods.remove(mod.id)
+    }
+    if (optionalMods.isNotEmpty())
+        throw UserError("some optional mod not found: $optionalMods")
+    return filtered
+}
+
+private fun computeModDiff(
+    mods: List<ModsConfig.ModInfo>,
+    downloadedMods: List<DownloadedMod>,
+): Triple<List<ModsConfig.ModInfo>, List<DownloadedMod>, List<DownloadedMod>> {
     if (downloadedMods.isEmpty())
-        return Triple(mods.list, emptyList(), emptyList())
+        return Triple(mods, emptyList(), emptyList())
 
     data class ModInfoPair(val modInfo: ModsConfig.ModInfo? = null, var downloadedMod: DownloadedMod? = null)
     val modMap = mutableMapOf<Pair<String, String>, ModInfoPair>()
 
-    for (modInfo in mods.list) {
+    for (modInfo in mods) {
         modMap[modInfo.id to modInfo.versionId] = ModInfoPair(modInfo)
     }
 

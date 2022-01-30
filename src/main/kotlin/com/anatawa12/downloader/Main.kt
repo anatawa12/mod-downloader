@@ -2,11 +2,13 @@
 
 package com.anatawa12.downloader
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import java.awt.GraphicsEnvironment
 import java.io.File
 import kotlin.system.exitProcess
 
-fun main(args: Array<String>) {
+fun main(args: Array<String>) = runBlocking(Dispatchers.Default) {
     if (args.isEmpty() && !GraphicsEnvironment.isHeadless()) startGui()
     else runCui(args)
 }
@@ -16,7 +18,7 @@ private fun error(error: String): Nothing {
     exitProcess(-1)
 }
 
-fun runCui(args: Array<String>) {
+suspend fun runCui(args: Array<String>) {
     if (args.isNotEmpty()) when (args[0]) {
         "--gui" -> return startGui()
         "--help" -> printHelpAndExit(runCatching { EmbedConfiguration.load() }.getOrNull())
@@ -31,6 +33,7 @@ fun runCui(args: Array<String>) {
     var clean = false
     var config: String? = null
     var dest: String? = null
+    val optionalModsList = mutableSetOf<String>()
     var i = 0
     while (i in args.indices) {
         val opt = args[i]
@@ -40,6 +43,7 @@ fun runCui(args: Array<String>) {
             "--clean" -> clean = true
             "--config" -> config = args.getOrElse(++i) { error("argument required for --config") }
             "--dest" -> dest = args.getOrElse(++i) { error("argument required for --dest") }
+            "--optional" -> optionalModsList.add(args.getOrElse(++i) { error("argument required for --optional") })
             "--help" -> printHelpAndExit(embedConfig)
             "--version" -> printVersionAndExit(embedConfig)
             "--licenses" -> printLicenseInfoAndExit()
@@ -51,6 +55,7 @@ fun runCui(args: Array<String>) {
                     'l' -> clean = true
                     'c' -> config = args.getOrElse(++i) { error("argument required for -c") }
                     'd' -> dest = args.getOrElse(++i) { error("argument required for -d") }
+                    'o' -> optionalModsList.add(args.getOrElse(++i) { error("argument required for -o") })
                     'h' -> printHelpAndExit(embedConfig)
                     'V' -> printVersionAndExit(embedConfig)
                     else -> error("unknown option: $opt")
@@ -61,16 +66,20 @@ fun runCui(args: Array<String>) {
     }
     if (config != null && embedConfig != null)
         error("option -c or --config is not valid for config-embed mod-downloader")
-
-    doDownload(
-        config = embedConfig?.location ?: config?.let(::File)?.let(ModsFileLocation::FileSystem) ?:
-            error("option -c or --config is required"),
+    val params = DownloadParameters(
         downloadTo = dest?.let(::File) ?: error("option -d or --dest is required"),
         mode = if (clean) {
             if (force) DownloadMode.CLEAN_DOWNLOAD_FORCE
             else DownloadMode.CLEAN_DOWNLOAD
         } else DownloadMode.DOWNLOAD,
-        logger = System.err::println
+        logger = System.err::println,
+        optionalModsList = optionalModsList,
+    )
+
+    doDownload(
+        config = embedConfig?.location ?: config?.let(::File)?.let(ModsFileLocation::FileSystem) ?:
+            error("option -c or --config is required"),
+        params = params,
     )
 }
 

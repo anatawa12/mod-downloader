@@ -2,24 +2,24 @@
 
 package com.anatawa12.downloader
 
-import java.awt.Component
-import java.awt.Desktop
-import java.awt.Dimension
-import java.awt.GraphicsEnvironment
+import kotlinx.coroutines.*
+import java.awt.*
 import java.awt.event.ActionEvent
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.net.URI
 import javax.swing.*
+import javax.swing.WindowConstants.DO_NOTHING_ON_CLOSE
+import javax.swing.table.AbstractTableModel
 import kotlin.system.exitProcess
 
 
-fun main() = startGui()
+fun main() = runBlocking(Dispatchers.Default) { startGui() }
 
-fun errorPanel(title: String, error: Throwable?, message: String, vararg extras: Component): Nothing {
+fun errorPanelNoExit(title: String, error: Throwable?, message: String, vararg extras: Component, parent: Component? = null) {
     JOptionPane.showMessageDialog(
-        null,
+        parent,
         arrayOf(
             JLabel(message),
             *extras,
@@ -33,6 +33,10 @@ fun errorPanel(title: String, error: Throwable?, message: String, vararg extras:
         title,
         JOptionPane.ERROR_MESSAGE,
     )
+}
+
+fun errorPanel(title: String, error: Throwable?, message: String, vararg extras: Component, parent: Component? = null): Nothing {
+    errorPanelNoExit(title, error, message, *extras, parent = parent)
     exitProcess(-1)
 }
 
@@ -43,7 +47,7 @@ fun linkButtons(vararg links: Pair<String, String>) = JPanel().apply {
         JButton(message).apply { addActionListener { Desktop.getDesktop().browse(URI.create(link)) } }.also(::add)
 }
 
-fun startGui() {
+suspend fun startGui() {
     if (GraphicsEnvironment.isHeadless()) error("GUI is not supported but explicitly gui mode")
     try {
         startGuiImpl()
@@ -55,7 +59,7 @@ fun startGui() {
     }
 }
 
-private fun startGuiImpl() {
+private suspend fun startGuiImpl() {
     val embedConfig = try {
         EmbedConfiguration.load()
     } catch (e: UserError) {
@@ -79,9 +83,7 @@ private fun startGuiImpl() {
         if (optionPane.value != JOptionPane.OK_OPTION) return
     }
 
-    val configLocation: ModsFileLocation = embedConfig?.location
-        ?: panel.configFile?.file?.let(ModsFileLocation::FileSystem)
-        ?: errorPanel("Missing Value", null, "No config location is specified")
+    val modsConfig: ModsConfig = panel.modList.getOrLoadModsConfig() ?: return // error has been handled
 
     val modsDir = panel.modsDir.file!!
     val mode = if (panel.mode == DownloadMode.DOWNLOAD) DownloadMode.DOWNLOAD else {
@@ -107,7 +109,13 @@ private fun startGuiImpl() {
     progress.isVisible = true
 
     try {
-        doDownload(configLocation, modsDir, mode, progressPanel::appendLine)
+        val params = DownloadParameters(
+            downloadTo = modsDir, 
+            mode = mode, 
+            logger = progressPanel::appendLine,
+            optionalModsList = panel.modList.optionalModsList,
+        )
+        doDownload(modsConfig, params)
         JOptionPane.showMessageDialog(null, "Download Complete", "Complete", JOptionPane.INFORMATION_MESSAGE)
     } catch (e: UserError) {
         errorPanel("Error Downloading Mods", e,
@@ -144,9 +152,17 @@ inline fun action(crossinline block: () -> Unit) = object : AbstractAction() {
     }
 }
 
+fun fullSized(fullSized: Component) = JPanel().apply {
+    layout = GridLayout(0, 1)
+    alignmentX = JPanel.LEFT_ALIGNMENT
+    alignmentY = JPanel.TOP_ALIGNMENT
+    add(fullSized)
+}
+
 @Suppress("LeakingThis")
 abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : JPanel() {
     private val selectedDirText: JTextField
+    private val button: JButton
 
     init {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
@@ -156,7 +172,7 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
             toolTipText = "Path to $name"
             columns = 20
         }.also(::add)
-        JButton().apply {
+        button = JButton().apply {
             action = action(::onSelect)
             text = "..."
             toolTipText = "Select an $name"
@@ -182,6 +198,12 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
         }
     }
 
+    var isEditable
+        get() = button.isEnabled
+        set(value) {
+            button.isEnabled = value
+        }
+
     var file: File?
         get() = selectedDirText.text.takeUnless { it.isBlank() }?.let(::File)
         set(value) {
@@ -193,7 +215,7 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
 
 class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPanel() {
     val dialog: JDialog get() = parent.parent.parent.parent.parent.parent.parent as JDialog
-    val configFile: ChooseFileLinePanel?
+    val modList: ModListInfo
     val modsDir: ChooseFileLinePanel
     private val modeButtonGroup: ButtonGroup
     val mode: DownloadMode get() = enumValueOf(modeButtonGroup.selection.actionCommand)
@@ -226,14 +248,6 @@ class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPane
             alignmentY = CENTER_ALIGNMENT
         }.also(::add)
 
-        configFile = if (embedConfig != null) null else {
-            object : ChooseFileLinePanel("config file", true) {
-                override fun onChange() {
-                    dialog.invalidate()
-                    dialog.pack()
-                }
-            }
-        }
         modsDir = object : ChooseFileLinePanel("mods directory", false) {
             override fun onChange() {
                 dialog.invalidate()
@@ -242,13 +256,216 @@ class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPane
         }
         JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            configFile?.let(::add)
+            modList = ModListInfo(embedConfig, ::dialog).also(::add)
             add(modsDir)
             alignmentX = CENTER_ALIGNMENT
             alignmentY = TOP_ALIGNMENT
         }.also(::add)
 
         modsDir.file = targetDir
+    }
+}
+
+class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) : JPanel() {
+    private val configFile: ChooseFileLinePanel?
+    private val modsListPanel: JPanel
+    private val modsListToggle: JButton?
+    private val tableModelImpl: TableModelImpl
+    var modsConfig: ModsConfig? = null
+    val optionalModsList get() = tableModelImpl.optionalModsList
+
+    init {
+        if (embedConfig != null) {
+            configFile = null
+            modsListToggle = null
+            modsConfig = null
+            CoroutineScope(Dispatchers.Default).launch {
+                modsConfig = loadModsConfigWithError(embedConfig.location, "Please concat the JAR provider with the following text")
+                    ?: exitProcess(-1)
+            }
+        } else {
+            configFile = object : ChooseFileLinePanel("config file", true) {
+                override fun onChange() {
+                    dialog().pack()
+                }
+            }
+            modsListToggle = JButton().apply {
+                action = action(::onClickLoad)
+                text = "Load Mod List"
+            }
+        }
+
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        configFile?.let(::add)
+        modsListToggle?.also { add(fullSized(it)) }
+
+        modsListPanel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+
+            add(JLabel("Optional Mods"))
+            JScrollPane().apply {
+                JTable(TableModelImpl().also { tableModelImpl = it }).apply {
+                    tableHeader.resizingAllowed = false
+                    tableHeader.reorderingAllowed = false
+                    columnModel.apply {
+                        getColumn(0).apply {
+                            minWidth = 50
+                            maxWidth = 50
+                            resizable = false
+                        }
+                    }
+                }.also { viewport.view = it }
+
+                preferredSize = Dimension(200, 80)
+
+            }.also(::add)
+
+            isVisible = false
+        }.also(::add)
+    }
+
+    suspend fun getOrLoadModsConfig(): ModsConfig? {
+        modsConfig?.let { return it }
+        return loadModsConfigWithError()
+    }
+
+    private var editing = true
+
+    private fun onClickLoad() {
+        if (editing) {
+            CoroutineScope(Dispatchers.Default).launch { startLoading() }
+        } else {
+            configFile?.isEditable = true
+            editing = true
+            modsListToggle!!.text = "Load Mod List"
+            modsListPanel.isVisible = !editing
+            tableModelImpl.clear()
+            dialog().pack()
+        }
+    }
+
+    private suspend fun startLoading() {
+        modsListToggle!!
+        configFile!!
+
+        val dialog = JDialog(dialog(), "Loading ...", true).apply {
+            JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                JLabel("Loading mod list", SwingConstants.CENTER).apply {
+                    alignmentX = CENTER_ALIGNMENT
+                    font = Font(font.name, font.style, 20)
+                }.also(::add)
+                ProgressSpinner().apply {
+                    preferredSize = Dimension(70, 70)
+                }.also(::add)
+            }.also(::add)
+            pack()
+            setLocationRelativeTo(this@ModListInfo)
+            defaultCloseOperation = DO_NOTHING_ON_CLOSE
+        }
+        SwingUtilities.invokeLater { dialog.isVisible = true }
+
+        val config: ModsConfig = try {
+            loadModsConfigWithError() ?: return
+        } finally {
+            SwingUtilities.invokeLater(dialog::dispose)
+        }
+
+        configFile.isEditable = false
+        editing = false
+        modsListToggle.text = "Change Mod List"
+        modsListPanel.isVisible = true
+        tableModelImpl.setConfig(config)
+        dialog().pack()
+    }
+
+    private suspend fun loadModsConfigWithError(
+        modsFileLocation: ModsFileLocation? = configFile!!.file?.let(ModsFileLocation::FileSystem),
+        additionalMessage: String = "",
+    ): ModsConfig? {
+        try {
+            val configLocation: ModsFileLocation = modsFileLocation ?: kotlin.run {
+                JOptionPane.showMessageDialog(null, JLabel("No config location is specified"),
+                    "Missing Value", JOptionPane.ERROR_MESSAGE)
+                return null
+            }
+            return loadModsConfig(configLocation).also { modsConfig = it }
+        } catch (e: UserError) {
+            errorPanelNoExit("Error Loading Mods List", e, 
+                "Error Loading Config file: ${e.message}\n" + additionalMessage,
+                parent = this)
+            return null
+        } catch (t: Throwable) {
+            errorPanelNoExit("Internal Error", t,
+                "Internal Error has occurred.\n" +
+                        "Please make issue for mod-downloader on issue tracker with the following text below",
+                linkButtons("Go to issue tracker" to "https://github.com/anatawa12/mod-downloader/issues/new"),
+                parent = this)
+            return null
+        }
+    }
+
+    private class TableModelImpl : AbstractTableModel() {
+        val headerName = arrayOf("install", "name")
+        val headerClass = arrayOf(Boolean::class.javaObjectType, String::class.java)
+        var values = listOf<Pair>()
+        val optionalModsList get() = values.filter { it.include }.map { it.modInfo.id }.toSet()
+
+        override fun getRowCount(): Int = values.size
+        override fun getColumnCount(): Int = headerName.size
+        override fun getColumnName(columnIndex: Int): String = headerName[columnIndex]
+        override fun getColumnClass(columnIndex: Int): Class<*> = headerClass[columnIndex]
+        override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = columnIndex == 0
+        override fun getValueAt(rowIndex: Int, columnIndex: Int): Any = when (columnIndex) {
+            0 -> values[rowIndex].include
+            1 -> values[rowIndex].modInfo.id
+            else -> error("$rowIndex, $columnIndex")
+        }
+
+        override fun setValueAt(aValue: Any?, rowIndex: Int, columnIndex: Int) {
+            check(columnIndex == 0)
+            values[rowIndex].include = aValue as Boolean
+            fireTableCellUpdated(rowIndex, columnIndex)
+        }
+
+        fun clear() {
+            fireTableRowsDeleted(0, values.size)
+            values = listOf()
+        }
+
+        fun setConfig(config: ModsConfig) {
+            values = config.list.asSequence().filter { it.optional }.map { Pair(it) }.toList()
+            fireTableRowsInserted(0, values.size)
+        }
+
+        private class Pair(val modInfo: ModsConfig.ModInfo, var include: Boolean = false)
+    }
+}
+
+class ProgressSpinner : JComponent() {
+    private var frame = 0
+
+    override fun paintComponent(g: Graphics) {
+        super.paintComponent(g)
+        g as Graphics2D
+        g.translate(width / 2.0, height / 2.0)
+        val r = minOf(width, height)
+        g.scale(r / 20.0, r / 20.0)
+        repeat(frames) {
+            g.rotate(Math.PI * 2 / frames)
+            g.color = if (it == frame) Color.BLACK else Color.GRAY
+            g.fillRect(-1, 4, 2, 6)
+        }
+        frame++
+        if (frame >= frames) frame = 0
+        CoroutineScope(Dispatchers.Default).launch {
+            delay(50)
+            SwingUtilities.invokeLater(::repaint)
+        }
+    }
+
+    companion object {
+        private const val frames = 12
     }
 }
 
