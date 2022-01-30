@@ -28,6 +28,7 @@ class DownloadParameters(
     val mode: DownloadMode,
     val logger: Logger,
     val optionalModsList: Set<String>,
+    val downloadFor: ModsConfig.ModSide,
 )
 
 suspend fun doDownload(config: ModsFileLocation, params: DownloadParameters) =
@@ -166,7 +167,7 @@ private suspend fun <A> doDownloadImpl(
     val modsConfig = load(config)
 
     val (updated, removed, keep) = computeModDiff(
-        filterOptionalMods(modsConfig.list, params.optionalModsList), 
+        filterMods(modsConfig.list, params.optionalModsList, params.downloadFor), 
         downloadedList,
     )
 
@@ -178,8 +179,9 @@ private suspend fun <A> doDownloadImpl(
 
     val downloadedUpdated = download(updated, downloadTo, logger)
 
-    downloadTo.resolve(DOWNLOADED_TXT).toFile().writeChannel()
-        .writeFully(DownloadedMod.write(downloadedUpdated + keep).toByteArray())
+    downloadTo.resolve(DOWNLOADED_TXT).toFile().writeChannel().use {
+        writeFully(DownloadedMod.write(downloadedUpdated + keep).toByteArray())
+    }
 }
 
 @Serializable
@@ -242,15 +244,19 @@ suspend fun downloadMod(
         throw UserError("$fileName already exists", e)
     }
 
-    body.copyTo(jarLocation.toFile().writeChannel())
+    jarLocation.toFile().writeChannel().use { body.copyTo(this) }
 
     return DownloadedMod(info.id, info.versionId, fileName)
 }
 
-private fun filterOptionalMods(mods: List<ModsConfig.ModInfo>, optionalModsList: Set<String>): List<ModsConfig.ModInfo> {
+private fun filterMods(
+    mods: List<ModsConfig.ModInfo>,
+    optionalModsList: Set<String>,
+    downloadFor: ModsConfig.ModSide,
+): List<ModsConfig.ModInfo> {
     val optionalMods = optionalModsList.toMutableSet()
     val filtered = mods.filter { mod ->
-        !mod.optional || optionalMods.remove(mod.id)
+        (!mod.optional || optionalMods.remove(mod.id)) && (mod.modSide == null || mod.modSide == downloadFor)
     }
     if (optionalMods.isNotEmpty())
         throw UserError("some optional mod not found: $optionalMods")

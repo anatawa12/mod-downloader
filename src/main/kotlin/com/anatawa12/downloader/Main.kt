@@ -34,6 +34,7 @@ suspend fun runCui(args: Array<String>) {
     var config: String? = null
     var dest: String? = null
     val optionalModsList = mutableSetOf<String>()
+    var downloadFor: ModsConfig.ModSide = ModsConfig.ModSide.SERVER
     var i = 0
     while (i in args.indices) {
         val opt = args[i]
@@ -44,6 +45,8 @@ suspend fun runCui(args: Array<String>) {
             "--config" -> config = args.getOrElse(++i) { error("argument required for --config") }
             "--dest" -> dest = args.getOrElse(++i) { error("argument required for --dest") }
             "--optional" -> optionalModsList.add(args.getOrElse(++i) { error("argument required for --optional") })
+            "--server" -> downloadFor = ModsConfig.ModSide.SERVER
+            "--client" -> downloadFor = ModsConfig.ModSide.CLIENT
             "--help" -> printHelpAndExit(embedConfig)
             "--version" -> printVersionAndExit(embedConfig)
             "--licenses" -> printLicenseInfoAndExit()
@@ -56,6 +59,8 @@ suspend fun runCui(args: Array<String>) {
                     'c' -> config = args.getOrElse(++i) { error("argument required for -c") }
                     'd' -> dest = args.getOrElse(++i) { error("argument required for -d") }
                     'o' -> optionalModsList.add(args.getOrElse(++i) { error("argument required for -o") })
+                    's' -> downloadFor = ModsConfig.ModSide.SERVER
+                    'i' -> downloadFor = ModsConfig.ModSide.CLIENT
                     'h' -> printHelpAndExit(embedConfig)
                     'V' -> printVersionAndExit(embedConfig)
                     else -> error("unknown option: $opt")
@@ -74,6 +79,7 @@ suspend fun runCui(args: Array<String>) {
         } else DownloadMode.DOWNLOAD,
         logger = System.err::println,
         optionalModsList = optionalModsList,
+        downloadFor = downloadFor,
     )
 
     doDownload(
@@ -102,6 +108,10 @@ private fun printHelpAndExit(embedConfig: EmbedConfiguration?): Nothing {
     System.err.println("\t-f, --force             With --cleam, this delete files in directory")
     if (!embedEnv) System.err.println("\t-c, --config <CONFIG>   Path to config file")
     System.err.println("\t-d, --dest <DIRECTORY>  Path to destination directory")
+    System.err.println("DOWNLOAD OPTIONS:")
+    System.err.println("\t-o, --optional <id>     Download optional mod with <id>")
+    System.err.println("\t-s, --server            Download mods for server side (default behavior)")
+    System.err.println("\t-i, --client            Download mods for client side")
 
     exitProcess(0)
 }
