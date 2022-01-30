@@ -109,7 +109,12 @@ private suspend fun startGuiImpl() {
     progress.isVisible = true
 
     try {
-        doDownload(modsConfig, modsDir, mode, progressPanel::appendLine)
+        val params = DownloadParameters(
+            downloadTo = modsDir, 
+            mode = mode, 
+            logger = progressPanel::appendLine,
+        )
+        doDownload(modsConfig, params)
         JOptionPane.showMessageDialog(null, "Download Complete", "Complete", JOptionPane.INFORMATION_MESSAGE)
     } catch (e: UserError) {
         errorPanel("Error Downloading Mods", e,

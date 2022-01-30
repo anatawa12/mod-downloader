@@ -63,16 +63,19 @@ suspend fun runCui(args: Array<String>) {
     }
     if (config != null && embedConfig != null)
         error("option -c or --config is not valid for config-embed mod-downloader")
-
-    doDownload(
-        config = embedConfig?.location ?: config?.let(::File)?.let(ModsFileLocation::FileSystem) ?:
-            error("option -c or --config is required"),
+    val params = DownloadParameters(
         downloadTo = dest?.let(::File) ?: error("option -d or --dest is required"),
         mode = if (clean) {
             if (force) DownloadMode.CLEAN_DOWNLOAD_FORCE
             else DownloadMode.CLEAN_DOWNLOAD
         } else DownloadMode.DOWNLOAD,
-        logger = System.err::println
+        logger = System.err::println,
+    )
+
+    doDownload(
+        config = embedConfig?.location ?: config?.let(::File)?.let(ModsFileLocation::FileSystem) ?:
+            error("option -c or --config is required"),
+        params = params,
     )
 }
 

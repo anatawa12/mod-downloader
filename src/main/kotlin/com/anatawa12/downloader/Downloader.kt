@@ -23,12 +23,17 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
 import kotlin.time.Duration.Companion.seconds
 
+class DownloadParameters(
+    val downloadTo: File,
+    val mode: DownloadMode,
+    val logger: Logger,
+)
 
-suspend fun doDownload(config: ModsFileLocation, downloadTo: File, mode: DownloadMode, logger: Logger) =
-    doDownloadImpl(config, downloadTo.toPath(), mode, logger, ::loadModsConfig)
+suspend fun doDownload(config: ModsFileLocation, params: DownloadParameters) =
+    doDownloadImpl(config, params, ::loadModsConfig)
 
-suspend fun doDownload(config: ModsConfig, downloadTo: File, mode: DownloadMode, logger: Logger) =
-    doDownloadImpl(config, downloadTo.toPath(), mode, logger) { it }
+suspend fun doDownload(config: ModsConfig, params: DownloadParameters) =
+    doDownloadImpl(config, params) { it }
 
 val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
@@ -145,11 +150,12 @@ private suspend fun download(updated: List<ModsConfig.ModInfo>, downloadTo: Path
 
 private suspend fun <A> doDownloadImpl(
     config: A,
-    downloadTo: Path,
-    mode: DownloadMode,
-    logger: Logger,
+    params: DownloadParameters,
     load: suspend (A) -> ModsConfig,
 ) {
+    val downloadTo = params.downloadTo.toPath()
+    val mode = params.mode
+    val logger = params.logger
     logger.log("config: $config")
     logger.log("downloadTo: $downloadTo")
     logger.log("mode: $mode")
