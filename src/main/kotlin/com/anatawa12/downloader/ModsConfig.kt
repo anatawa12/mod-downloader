@@ -129,6 +129,8 @@ class ModsConfig(val list: List<ModInfo>) {
             return text!!
         }
 
+        private fun tryParenthesized(): String? = if (kind() == TokenKind.Parenthesized) moveNext() else null
+
         private fun error(message: String): Nothing = throw ParsingError(message, fileName, reader1.line)
 
         fun parseModsConfig(): ModsConfig = ModsConfig(buildList {
@@ -136,7 +138,22 @@ class ModsConfig(val list: List<ModInfo>) {
         })
 
         private fun parseMod(): ModInfo {
-            expectKeyword("mod")
+            var optional = false
+            while (true) {
+                if (kind() != TokenKind.Keyword) error("expected 'mod' or mod modifier")
+                when (text()) {
+                    "mod" -> {
+                        kind = null
+                        break
+                    }
+                    "optional" -> {
+                        if (optional) error("multiple optional")
+                        kind = null
+                        optional = true
+                    }
+                    else -> error("unknown mod modifier: $text")
+                }
+            }
             val id = getKeywordOrQuotedAndMove()
             var source: ModSource? = null
             var versionId: String? = null
@@ -157,16 +174,14 @@ class ModsConfig(val list: List<ModInfo>) {
                         if (versionId != null) error("multiple from")
                         kind = null
                         versionId = getKeywordOrQuotedAndMove()
-                        if (kind() == TokenKind.Parenthesized) {
-                            versionName = moveNext()
-                        }
+                        versionName = tryParenthesized()
                     }
                     else -> break
                 }
             }
             if (source == null) error("expected 'from'")
             if (versionId == null) error("expected 'version'")
-            return ModInfo(id, source, versionId, versionName)
+            return ModInfo(id, source, versionId, versionName, optional)
         }
 
         private fun parseCurseModSource(): CurseMod = CurseMod(getKeywordOrQuotedAndMove())
@@ -186,7 +201,13 @@ class ModsConfig(val list: List<ModInfo>) {
         }
     }
 
-    data class ModInfo(val id: String, val source: ModSource, val versionId: String, val versionName: String?)
+    data class ModInfo(
+        val id: String,
+        val source: ModSource,
+        val versionId: String,
+        val versionName: String?,
+        val optional: Boolean,
+    )
 
     sealed class ModSource
     data class CurseMod(val slug: String) : ModSource()
