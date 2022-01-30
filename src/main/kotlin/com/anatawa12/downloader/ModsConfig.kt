@@ -206,7 +206,7 @@ class ModsConfig(val list: List<ModInfo>) {
         val source: ModSource,
         val versionId: String,
         val versionName: String?,
-        val optional: Boolean,
+        val optional: Boolean = false,
     )
 
     sealed class ModSource
