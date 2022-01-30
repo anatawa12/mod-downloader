@@ -2,11 +2,13 @@
 
 package com.anatawa12.downloader
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import java.awt.GraphicsEnvironment
 import java.io.File
 import kotlin.system.exitProcess
 
-fun main(args: Array<String>) {
+fun main(args: Array<String>) = runBlocking(Dispatchers.Default) {
     if (args.isEmpty() && !GraphicsEnvironment.isHeadless()) startGui()
     else runCui(args)
 }
@@ -16,7 +18,7 @@ private fun error(error: String): Nothing {
     exitProcess(-1)
 }
 
-fun runCui(args: Array<String>) {
+suspend fun runCui(args: Array<String>) {
     if (args.isNotEmpty()) when (args[0]) {
         "--gui" -> return startGui()
         "--help" -> printHelpAndExit(runCatching { EmbedConfiguration.load() }.getOrNull())

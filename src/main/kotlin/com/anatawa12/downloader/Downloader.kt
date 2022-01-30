@@ -24,11 +24,11 @@ import kotlin.io.path.*
 import kotlin.time.Duration.Companion.seconds
 
 
-fun doDownload(config: ModsFileLocation, downloadTo: File, mode: DownloadMode, logger: Logger) =
-    runBlocking(Dispatchers.Default) { doDownloadImpl(config, downloadTo.toPath(), mode, logger, ::loadModsConfig) }
+suspend fun doDownload(config: ModsFileLocation, downloadTo: File, mode: DownloadMode, logger: Logger) =
+    doDownloadImpl(config, downloadTo.toPath(), mode, logger, ::loadModsConfig)
 
-fun doDownload(config: ModsConfig, downloadTo: File, mode: DownloadMode, logger: Logger) =
-    runBlocking(Dispatchers.Default) { doDownloadImpl(config, downloadTo.toPath(), mode, logger) { it } }
+suspend fun doDownload(config: ModsConfig, downloadTo: File, mode: DownloadMode, logger: Logger) =
+    doDownloadImpl(config, downloadTo.toPath(), mode, logger) { it }
 
 val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
@@ -89,7 +89,7 @@ private fun checkDownloadToDir(downloadTo: Path, mode: DownloadMode, logger: Log
     return downloadedList
 }
 
-private suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
+suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
     return when (config) {
         is ModsFileLocation.FileSystem -> {
             try {
