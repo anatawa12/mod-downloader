@@ -113,6 +113,7 @@ private suspend fun startGuiImpl() {
             downloadTo = modsDir, 
             mode = mode, 
             logger = progressPanel::appendLine,
+            optionalModsList = panel.modList.optionalModsList,
         )
         doDownload(modsConfig, params)
         JOptionPane.showMessageDialog(null, "Download Complete", "Complete", JOptionPane.INFORMATION_MESSAGE)
@@ -271,6 +272,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
     private val modsListToggle: JButton?
     private val tableModelImpl: TableModelImpl
     var modsConfig: ModsConfig? = null
+    val optionalModsList get() = tableModelImpl.optionalModsList
 
     init {
         if (embedConfig != null) {
@@ -406,8 +408,9 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
     private class TableModelImpl : AbstractTableModel() {
         val headerName = arrayOf("install", "name")
         val headerClass = arrayOf(Boolean::class.javaObjectType, String::class.java)
+        var values = listOf<Pair>()
+        val optionalModsList get() = values.filter { it.include }.map { it.modInfo.id }.toSet()
 
-        var values = arrayOf<Pair>()
         override fun getRowCount(): Int = values.size
         override fun getColumnCount(): Int = headerName.size
         override fun getColumnName(columnIndex: Int): String = headerName[columnIndex]
@@ -426,14 +429,16 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
         }
 
         fun clear() {
-            // TODO
+            fireTableRowsDeleted(0, values.size)
+            values = listOf()
         }
 
         fun setConfig(config: ModsConfig) {
-            // TODO
+            values = config.list.asSequence().filter { it.optional }.map { Pair(it) }.toList()
+            fireTableRowsInserted(0, values.size)
         }
 
-        private class Pair(val modInfo: ModsConfig.ModInfo, var include: Boolean)
+        private class Pair(val modInfo: ModsConfig.ModInfo, var include: Boolean = false)
     }
 }
 

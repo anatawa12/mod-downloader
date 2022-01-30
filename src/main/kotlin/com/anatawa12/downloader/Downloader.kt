@@ -27,6 +27,7 @@ class DownloadParameters(
     val downloadTo: File,
     val mode: DownloadMode,
     val logger: Logger,
+    val optionalModsList: Set<String>,
 )
 
 suspend fun doDownload(config: ModsFileLocation, params: DownloadParameters) =
@@ -164,7 +165,10 @@ private suspend fun <A> doDownloadImpl(
 
     val modsConfig = load(config)
 
-    val (updated, removed, keep) = computeModDiff(modsConfig, downloadedList)
+    val (updated, removed, keep) = computeModDiff(
+        filterOptionalMods(modsConfig.list, params.optionalModsList), 
+        downloadedList,
+    )
 
     logger.log("mods to be downloaded: ${updated.size} mod(s)")
     logger.log("mods to be removed: ${removed.size} mod(s)")
@@ -243,14 +247,27 @@ suspend fun downloadMod(
     return DownloadedMod(info.id, info.versionId, fileName)
 }
 
-private fun computeModDiff(mods: ModsConfig, downloadedMods: List<DownloadedMod>): Triple<List<ModsConfig.ModInfo>, List<DownloadedMod>, List<DownloadedMod>> {
+private fun filterOptionalMods(mods: List<ModsConfig.ModInfo>, optionalModsList: Set<String>): List<ModsConfig.ModInfo> {
+    val optionalMods = optionalModsList.toMutableSet()
+    val filtered = mods.filter { mod ->
+        !mod.optional || optionalMods.remove(mod.id)
+    }
+    if (optionalMods.isNotEmpty())
+        throw UserError("some optional mod not found: $optionalMods")
+    return filtered
+}
+
+private fun computeModDiff(
+    mods: List<ModsConfig.ModInfo>,
+    downloadedMods: List<DownloadedMod>,
+): Triple<List<ModsConfig.ModInfo>, List<DownloadedMod>, List<DownloadedMod>> {
     if (downloadedMods.isEmpty())
-        return Triple(mods.list, emptyList(), emptyList())
+        return Triple(mods, emptyList(), emptyList())
 
     data class ModInfoPair(val modInfo: ModsConfig.ModInfo? = null, var downloadedMod: DownloadedMod? = null)
     val modMap = mutableMapOf<Pair<String, String>, ModInfoPair>()
 
-    for (modInfo in mods.list) {
+    for (modInfo in mods) {
         modMap[modInfo.id to modInfo.versionId] = ModInfoPair(modInfo)
     }
 

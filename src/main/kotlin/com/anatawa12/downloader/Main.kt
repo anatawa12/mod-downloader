@@ -33,6 +33,7 @@ suspend fun runCui(args: Array<String>) {
     var clean = false
     var config: String? = null
     var dest: String? = null
+    val optionalModsList = mutableSetOf<String>()
     var i = 0
     while (i in args.indices) {
         val opt = args[i]
@@ -42,6 +43,7 @@ suspend fun runCui(args: Array<String>) {
             "--clean" -> clean = true
             "--config" -> config = args.getOrElse(++i) { error("argument required for --config") }
             "--dest" -> dest = args.getOrElse(++i) { error("argument required for --dest") }
+            "--optional" -> optionalModsList.add(args.getOrElse(++i) { error("argument required for --optional") })
             "--help" -> printHelpAndExit(embedConfig)
             "--version" -> printVersionAndExit(embedConfig)
             "--licenses" -> printLicenseInfoAndExit()
@@ -53,6 +55,7 @@ suspend fun runCui(args: Array<String>) {
                     'l' -> clean = true
                     'c' -> config = args.getOrElse(++i) { error("argument required for -c") }
                     'd' -> dest = args.getOrElse(++i) { error("argument required for -d") }
+                    'o' -> optionalModsList.add(args.getOrElse(++i) { error("argument required for -o") })
                     'h' -> printHelpAndExit(embedConfig)
                     'V' -> printVersionAndExit(embedConfig)
                     else -> error("unknown option: $opt")
@@ -70,6 +73,7 @@ suspend fun runCui(args: Array<String>) {
             else DownloadMode.CLEAN_DOWNLOAD
         } else DownloadMode.DOWNLOAD,
         logger = System.err::println,
+        optionalModsList = optionalModsList,
     )
 
     doDownload(
