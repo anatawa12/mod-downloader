@@ -86,6 +86,7 @@ private suspend fun startGuiImpl() {
     val modsConfig: ModsConfig = panel.modList.getOrLoadModsConfig() ?: return // error has been handled
 
     val modsDir = panel.modsDir.file!!
+    var force = false
     val mode = if (panel.mode == DownloadMode.DOWNLOAD) DownloadMode.DOWNLOAD else {
         if (modsDir.listFiles()?.isNotEmpty() == true) {
             val check = JOptionPane("you're clean downloading to non-empty directory.\n" +
@@ -96,7 +97,8 @@ private suspend fun startGuiImpl() {
             dialog.dispose()
             if (check.value != JOptionPane.OK_OPTION) return
         }
-        DownloadMode.CLEAN_DOWNLOAD_FORCE
+        force = true
+        DownloadMode.CLEAN_DOWNLOAD
     }
 
     val progressPanel = DownloadingPanel()
@@ -112,6 +114,7 @@ private suspend fun startGuiImpl() {
         val params = DownloadParameters(
             downloadTo = modsDir, 
             mode = mode, 
+            force = force,
             logger = progressPanel::appendLine,
             optionalModsList = panel.modList.optionalModsList,
             downloadFor = panel.modList.modSide,

@@ -26,6 +26,7 @@ import kotlin.time.Duration.Companion.seconds
 class DownloadParameters(
     val downloadTo: File,
     val mode: DownloadMode,
+    val force: Boolean,
     val logger: Logger,
     val optionalModsList: Set<String>,
     val downloadFor: ModsConfig.ModSide,
@@ -41,7 +42,12 @@ val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
 private const val DOWNLOADED_TXT = "downloaded.txt"
 
-private fun checkDownloadToDir(downloadTo: Path, mode: DownloadMode, logger: Logger): List<DownloadedMod> {
+private fun checkDownloadToDir(
+    downloadTo: Path,
+    mode: DownloadMode,
+    force: Boolean,
+    logger: Logger,
+): List<DownloadedMod> {
     downloadTo.createDirectories()
     if (!downloadTo.isDirectory()) throw UserError("$downloadTo is not directory. may be a file")
 
@@ -66,24 +72,24 @@ private fun checkDownloadToDir(downloadTo: Path, mode: DownloadMode, logger: Log
         }
         DownloadMode.CLEAN_DOWNLOAD -> {
             val entries = downloadTo.listDirectoryEntries()
-            if (entries.isEmpty())
-                throw UserError("$downloadTo is not empty. to remove files in the directory, run with --force")
-            downloadedList = emptyList()
-        }
-        DownloadMode.CLEAN_DOWNLOAD_FORCE -> {
-            downloadTo.listDirectoryEntries().forEach { entry ->
-                Files.walkFileTree(entry, object : SimpleFileVisitor<Path>() {
-                    override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
-                        exc?.let { throw it }
-                        dir.deleteExisting()
-                        return FileVisitResult.CONTINUE
-                    }
+            if (force) {
+                downloadTo.listDirectoryEntries().forEach { entry ->
+                    Files.walkFileTree(entry, object : SimpleFileVisitor<Path>() {
+                        override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult {
+                            exc?.let { throw it }
+                            dir.deleteExisting()
+                            return FileVisitResult.CONTINUE
+                        }
 
-                    override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                        file.deleteExisting()
-                        return FileVisitResult.CONTINUE
-                    }
-                })
+                        override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+                            file.deleteExisting()
+                            return FileVisitResult.CONTINUE
+                        }
+                    })
+                }
+            } else {
+                if (entries.isEmpty())
+                    throw UserError("$downloadTo is not empty. to remove files in the directory, run with --force")
             }
             downloadedList = emptyList()
         }
@@ -129,7 +135,12 @@ private fun deleteAll(removed: List<DownloadedMod>, downloadTo: Path) {
     }
 }
 
-private suspend fun download(updated: List<ModsConfig.ModInfo>, downloadTo: Path, logger: Logger): List<DownloadedMod> {
+private suspend fun download(
+    updated: List<ModsConfig.ModInfo>,
+    downloadTo: Path,
+    force: Boolean,
+    logger: Logger,
+): List<DownloadedMod> {
     if (updated.isEmpty()) return emptyList()
 
     return coroutineScope {
@@ -140,7 +151,7 @@ private suspend fun download(updated: List<ModsConfig.ModInfo>, downloadTo: Path
             async {
                 try {
                     logger.log("downloading ${info.id} version ${info.versionName ?: info.versionId}")
-                    downloadMod(client, info, downloadTo, logger)
+                    downloadMod(client, info, downloadTo, force, logger)
                 } finally {
                     logger.log("download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
                             "${info.id} version ${info.versionName ?: info.versionId}")
@@ -162,7 +173,7 @@ private suspend fun <A> doDownloadImpl(
     logger.log("downloadTo: $downloadTo")
     logger.log("mode: $mode")
 
-    val downloadedList = checkDownloadToDir(downloadTo, mode, logger)
+    val downloadedList = checkDownloadToDir(downloadTo, mode, params.force, logger)
 
     val modsConfig = load(config)
 
@@ -177,7 +188,7 @@ private suspend fun <A> doDownloadImpl(
 
     deleteAll(removed, downloadTo)
 
-    val downloadedUpdated = download(updated, downloadTo, logger)
+    val downloadedUpdated = download(updated, downloadTo, params.force, logger)
 
     downloadTo.resolve(DOWNLOADED_TXT).toFile().writeChannel().use {
         writeFully(DownloadedMod.write(downloadedUpdated + keep).toByteArray())
@@ -191,6 +202,7 @@ suspend fun downloadMod(
     client: HttpClient,
     info: ModsConfig.ModInfo,
     downloadTo: Path,
+    force: Boolean,
     logger: Logger,
 ): DownloadedMod {
     val body: ByteReadChannel
@@ -238,6 +250,7 @@ suspend fun downloadMod(
     }
     val jarLocation = downloadTo.resolve(fileName)
 
+    if (force) jarLocation.deleteExisting()
     try {
         jarLocation.createFile()
     } catch (e: FileAlreadyExistsException) {
@@ -313,7 +326,6 @@ fun interface Logger {
 enum class DownloadMode {
     DOWNLOAD,
     CLEAN_DOWNLOAD,
-    CLEAN_DOWNLOAD_FORCE,
 }
 
 sealed class ModsFileLocation {

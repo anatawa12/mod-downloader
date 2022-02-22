@@ -73,10 +73,8 @@ suspend fun runCui(args: Array<String>) {
         error("option -c or --config is not valid for config-embed mod-downloader")
     val params = DownloadParameters(
         downloadTo = dest?.let(::File) ?: error("option -d or --dest is required"),
-        mode = if (clean) {
-            if (force) DownloadMode.CLEAN_DOWNLOAD_FORCE
-            else DownloadMode.CLEAN_DOWNLOAD
-        } else DownloadMode.DOWNLOAD,
+        mode = if (clean) DownloadMode.CLEAN_DOWNLOAD else DownloadMode.DOWNLOAD,
+        force = force,
         logger = System.err::println,
         optionalModsList = optionalModsList,
         downloadFor = downloadFor,
