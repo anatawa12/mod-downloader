@@ -250,7 +250,7 @@ suspend fun downloadMod(
     }
     val jarLocation = downloadTo.resolve(fileName)
 
-    if (force) jarLocation.deleteExisting()
+    if (force) jarLocation.deleteIfExists()
     try {
         jarLocation.createFile()
     } catch (e: FileAlreadyExistsException) {
