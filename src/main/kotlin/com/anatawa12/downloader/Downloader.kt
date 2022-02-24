@@ -221,49 +221,26 @@ suspend fun downloadMod(
     force: Boolean,
     logger: Logger,
 ): DownloadedMod {
-    val body: ByteReadChannel
-    val fileName: String
-    when (val source = info.source) {
-        is ModsConfig.CurseMod -> {
-            val cfWidgetURL = URLBuilder("https://api.cfwidget.com/")
-                .path("minecraft", "mc-mods", source.slug)
-                .build()
-            val projectId = run {
-                while (true) {
-                    logger.log("fetching project id and file info from cfwidget for ${info.id}")
-                    val resJson = client.get<String>(cfWidgetURL)
-                    val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
-                    if (res.id != null) return@run res.id
-                    if (res.error != "in_queue")
-                        throw IOException("unknown response from cfwidget: ${res.error}")
-                    delay(10.seconds.inWholeMilliseconds)
-                }
-                @Suppress("UNREACHABLE_CODE") // compiler bug
-                error("unreachable")
-            }
-            logger.log("fetching download url for ${info.id}")
-            val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/")
-                .path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
-                .build()
-            val jarURL = client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8).let(::Url)
-            val jar = client.get<ByteReadChannel>(jarURL)
-            fileName = jarURL.encodedPath.substringAfterLast('/').decodeURLPart()
-            body = jar
-        }
-        is ModsConfig.URLPattern -> {
-            val url = source.urlPattern.replace("\$version", info.versionId)
-            val response = client.get<HttpResponse>(url)
-            val disposition = runCatching {
-                response.headers[HttpHeaders.ContentDisposition]?.let(ContentDisposition::parse)
-            }.getOrNull()
-            if (!response.status.isSuccess())
-                throw UserError("$url returns error code: ${response.status}")
-            fileName = disposition?.parameter(ContentDisposition.Parameters.FileNameAsterisk)?.let(::parseRFC5987)
-                ?: disposition?.parameter(ContentDisposition.Parameters.FileName)
-                        ?: url.substringAfterLast('/')
-            body = response.content
-        }
+    val url = when (val source = info.source) {
+        is ModsConfig.CurseMod -> computeCurseDownloadURL(client, source.slug, info.id, info.versionId, logger)
+        is ModsConfig.URLPattern -> computeUrlPatternDownloadURL(source.urlPattern, info.id, info.versionId, logger)
     }
+
+    val response = client.get<HttpResponse>(url)
+
+    val disposition = runCatching {
+        response.headers[HttpHeaders.ContentDisposition]?.let(ContentDisposition::parse)
+    }.getOrNull()
+
+    if (!response.status.isSuccess())
+        throw UserError("$url returns error code: ${response.status}")
+
+    val fileName = disposition?.parameter(ContentDisposition.Parameters.FileNameAsterisk)?.let(::parseRFC5987)
+        ?: disposition?.parameter(ContentDisposition.Parameters.FileName)
+                ?: url.encodedPath.substringAfterLast('/').decodeURLPart()
+    if (fileName.contains('/') || fileName.contains('\\'))
+        throw UserError("invalid file name from remote: $fileName")
+
     val jarLocation = downloadTo.resolve(fileName)
 
     if (force) jarLocation.deleteIfExists()
@@ -273,9 +250,51 @@ suspend fun downloadMod(
         throw UserError("$fileName already exists", e)
     }
 
-    jarLocation.toFile().writeChannel().use { body.copyTo(this) }
+    jarLocation.toFile().writeChannel().use { response.content.copyTo(this) }
 
     return DownloadedMod(info.id, info.versionId, fileName)
+}
+
+private suspend fun computeCurseDownloadURL(
+    client: HttpClient,
+    slug: String,
+    id: String,
+    versionId: String,
+    logger: Logger,
+): Url {
+    val cfWidgetURL = URLBuilder("https://api.cfwidget.com/")
+        .path("minecraft", "mc-mods", slug)
+        .build()
+    val projectId = run {
+        while (true) {
+            logger.log("fetching project id and file info from cfwidget for $id")
+            val resJson = client.get<String>(cfWidgetURL)
+            val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
+            if (res.id != null) return@run res.id
+            if (res.error != "in_queue")
+                throw IOException("unknown response from cfwidget: ${res.error}")
+            delay(10.seconds.inWholeMilliseconds)
+        }
+        @Suppress("UNREACHABLE_CODE") // compiler bug
+        error("unreachable")
+    }
+    logger.log("fetching download url for $id")
+    val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/")
+        .path("api", "v2", "addon", projectId.toString(), "file", versionId, "download-url")
+        .build()
+    return client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8).let(::Url)
+}
+
+@Suppress("RedundantSuspendModifier")
+private suspend fun computeUrlPatternDownloadURL(
+    urlPattern: String,
+    id: String,
+    versionId: String,
+    logger: Logger,
+): Url {
+    val url = urlPattern.replace("\$version", versionId)
+    logger.log("fetching download url for $id: $url")
+    return Url(url)
 }
 
 private fun filterMods(
