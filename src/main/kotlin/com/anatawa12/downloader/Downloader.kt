@@ -145,7 +145,11 @@ private suspend fun download(
 
     return coroutineScope {
         val completeCount = AtomicInteger(0)
-        val client = HttpClient(CIO)
+        val client = HttpClient(CIO) {
+            engine {
+                requestTimeout = 1000 * 60
+            }
+        }
         val updatedCount = updated.size
         updated.map { info ->
             async {
