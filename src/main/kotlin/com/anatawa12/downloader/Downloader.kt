@@ -224,6 +224,7 @@ suspend fun downloadMod(
     val url = when (val source = info.source) {
         is ModsConfig.CurseMod -> computeCurseDownloadURL(client, source.slug, info.id, info.versionId, logger)
         is ModsConfig.URLPattern -> computeUrlPatternDownloadURL(source.urlPattern, info.id, info.versionId, logger)
+        ModsConfig.Optifine -> computeOptifineDownloadURL(client, info.versionId, logger)
     }
 
     val response = client.get<HttpResponse>(url)
@@ -251,6 +252,19 @@ suspend fun downloadMod(
     }
 
     jarLocation.toFile().writeChannel().use { response.content.copyTo(this) }
+
+    when (info.source) {
+        is ModsConfig.CurseMod -> {}
+        is ModsConfig.URLPattern -> {}
+        ModsConfig.Optifine -> {
+            val bytes = ByteArray(4)
+            jarLocation.toFile().readChannel().readFully(bytes)
+            if (!bytes.contentEquals(byteArrayOf(0x50, 0x4b, 0x03, 0x04))) {
+                //runCatching { jarLocation.deleteExisting() }
+                throw IOException("invalid response")
+            }
+        }
+    }
 
     return DownloadedMod(info.id, info.versionId, fileName)
 }
@@ -295,6 +309,30 @@ private suspend fun computeUrlPatternDownloadURL(
     val url = urlPattern.replace("\$version", versionId)
     logger.log("fetching download url for $id: $url")
     return Url(url)
+}
+
+private suspend fun computeOptifineDownloadURL(client: HttpClient, versionId: String, logger: Logger): Url {
+    val adloadx = URLBuilder("https://optifine.net/adloadx")
+        .apply { parameters["f"] = "OptiFine_${versionId}.jar" }
+        .build()
+    logger.log("fetching download url for optifine $versionId")
+    val resHTML = client.get<String>(adloadx)
+
+    val aLine = resHTML.lineSequence()
+        .dropWhile { !it.contains("class=\"downloadButton\"") }
+        .drop(1)
+        .dropWhile { !it.contains("<a") }
+        .firstOrNull()
+        ?: throw IOException("unknown response from optifine.net: no download button: $resHTML")
+
+    val regex = "<a [^>]*href=['\"]([^'\"]*)['\"]".toRegex()
+    val match = regex.find(aLine)
+        ?: throw IOException("unknown response from optifine.net: no a tag: $aLine")
+    val href = match.groups[1]!!.value
+    logger.log("href: $href")
+    val download = URLBuilder(adloadx).takeFrom(href).build()
+    logger.log("downloading optifine: $download")
+    return download
 }
 
 private fun filterMods(

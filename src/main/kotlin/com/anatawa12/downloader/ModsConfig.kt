@@ -178,6 +178,7 @@ class ModsConfig(val list: List<ModInfo>) {
                         source = when (val kind = getKeywordAndMove().lowercase()) {
                             "curse" -> parseCurseModSource()
                             "url" -> parseUrlModSource()
+                            "optifine" -> parseOptifineModSource()
                             else -> error("unexpected mod source kind: '$kind'")
                         }
                     }
@@ -198,6 +199,8 @@ class ModsConfig(val list: List<ModInfo>) {
         private fun parseCurseModSource(): CurseMod = CurseMod(getKeywordOrQuotedAndMove())
 
         private fun parseUrlModSource(): URLPattern = URLPattern(getKeywordOrQuotedAndMove())
+
+        private fun parseOptifineModSource(): Optifine = Optifine
 
         enum class TokenKind {
             Keyword,
@@ -229,4 +232,6 @@ class ModsConfig(val list: List<ModInfo>) {
     sealed class ModSource
     data class CurseMod(val slug: String) : ModSource()
     data class URLPattern(val urlPattern: String) : ModSource()
+    @Suppress("SpellCheckingInspection")
+    object Optifine : ModSource()
 }
