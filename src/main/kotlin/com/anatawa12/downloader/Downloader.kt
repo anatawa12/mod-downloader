@@ -140,8 +140,8 @@ private suspend fun download(
     downloadTo: Path,
     force: Boolean,
     logger: Logger,
-): List<DownloadedMod> {
-    if (updated.isEmpty()) return emptyList()
+): Pair<List<DownloadedMod>, Throwable?> {
+    if (updated.isEmpty()) return Pair(emptyList(), null)
 
     return coroutineScope {
         val completeCount = AtomicInteger(0)
@@ -151,17 +151,23 @@ private suspend fun download(
             }
         }
         val updatedCount = updated.size
-        updated.map { info ->
-            async {
-                try {
-                    logger.log("downloading ${info.id} version ${info.versionName ?: info.versionId}")
-                    downloadMod(client, info, downloadTo, force, logger)
-                } finally {
-                    logger.log("download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
-                            "${info.id} version ${info.versionName ?: info.versionId}")
+        val downloaded = ArrayList<DownloadedMod>(updatedCount)
+        try {
+            updated.map { info ->
+                async {
+                    try {
+                        logger.log("downloading ${info.id} version ${info.versionName ?: info.versionId}")
+                        downloaded += downloadMod(client, info, downloadTo, force, logger)
+                    } finally {
+                        logger.log("download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
+                                "${info.id} version ${info.versionName ?: info.versionId}")
+                    }
                 }
-            }
-        }.awaitAll()
+            }.awaitAll()
+            downloaded to null
+        } catch (t: Throwable) {
+            downloaded to t 
+        }
     }
 }
 
@@ -192,11 +198,17 @@ private suspend fun <A> doDownloadImpl(
 
     deleteAll(removed, downloadTo)
 
-    val downloadedUpdated = download(updated, downloadTo, params.force, logger)
+    val (downloadedUpdated, t) = download(updated, downloadTo, params.force, logger)
 
-    downloadTo.resolve(DOWNLOADED_TXT).toFile().writeChannel().use {
-        writeFully(DownloadedMod.write(downloadedUpdated + keep).toByteArray())
+    try {
+        downloadTo.resolve(DOWNLOADED_TXT).toFile().writeChannel().use {
+            writeFully(DownloadedMod.write(downloadedUpdated + keep).toByteArray())
+        }
+    } catch (t2: Throwable) {
+        if (t != null) t2.addSuppressed(t)
+        throw t2
     }
+    if (t != null) throw t
 }
 
 @Serializable
