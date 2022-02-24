@@ -285,10 +285,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
             configFile = null
             modsListToggle = null
             modsConfig = null
-            CoroutineScope(Dispatchers.Default).launch {
-                modsConfig = loadModsConfigWithError(embedConfig.location, "Please concat the JAR provider with the following text")
-                    ?: exitProcess(-1)
-            }
+            CoroutineScope(Dispatchers.Default).launch { downloadEmbedConfig(embedConfig) }
         } else {
             configFile = object : ChooseFileLinePanel("config file", true) {
                 override fun onChange() {
@@ -356,6 +353,16 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
             tableModelImpl.clear()
             dialog().pack()
         }
+    }
+
+    private suspend fun downloadEmbedConfig(embedConfig: EmbedConfiguration) {
+        val modsConfig = loadModsConfigWithError(embedConfig.location, "Please concat the JAR provider with the following text")
+            ?: exitProcess(-1)
+        this.modsConfig = modsConfig;
+
+        modsListPanel.isVisible = true
+        tableModelImpl.setConfig(modsConfig)
+        dialog().pack()
     }
 
     private suspend fun startLoading() {
