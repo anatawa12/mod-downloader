@@ -143,16 +143,16 @@ private suspend fun download(
 ): Pair<List<DownloadedMod>, Throwable?> {
     if (updated.isEmpty()) return Pair(emptyList(), null)
 
-    return coroutineScope {
-        val completeCount = AtomicInteger(0)
-        val client = HttpClient(CIO) {
-            engine {
-                requestTimeout = 1000 * 60
+    val downloaded = ArrayList<DownloadedMod>(updated.size)
+    try {
+        return coroutineScope {
+            val completeCount = AtomicInteger(0)
+            val client = HttpClient(CIO) {
+                engine {
+                    requestTimeout = 1000 * 60
+                }
             }
-        }
-        val updatedCount = updated.size
-        val downloaded = ArrayList<DownloadedMod>(updatedCount)
-        try {
+            val updatedCount = updated.size
             updated.map { info ->
                 async {
                     try {
@@ -165,9 +165,9 @@ private suspend fun download(
                 }
             }.awaitAll()
             downloaded to null
-        } catch (t: Throwable) {
-            downloaded to t 
         }
+    } catch (t: Throwable) {
+        return downloaded to t
     }
 }
 
