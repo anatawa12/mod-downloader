@@ -33,13 +33,12 @@ data class Version(
         // snapshot version must match stabilized version.
         // stable version must support its snapshot versions in general
         if (snapshot) return current.stabilized == stabilized
-        return this in supportedRange
+        return this in minimum..current
     }
 
     companion object {
         val minimum = Version(0u, 0u, 0u)
         val current = parse(Constants.version)
-        val supportedRange = minimum..current
 
         fun parse(textIn: String): Version {
             try {

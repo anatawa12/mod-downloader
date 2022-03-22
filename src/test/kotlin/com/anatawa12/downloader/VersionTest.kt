@@ -1,9 +1,14 @@
 package com.anatawa12.downloader
 
 import io.kotest.core.spec.style.DescribeSpec
+import io.kotest.matchers.booleans.shouldBeFalse
+import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
+import io.mockk.every
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 
 class VersionTest : DescribeSpec() {
     init {
@@ -49,6 +54,37 @@ class VersionTest : DescribeSpec() {
             it("same patch, snapshot only") {
                 Version(1u, 0u, 0u, true) shouldBeLessThan Version(1u, 0u, 0u)
                 Version(1u, 0u, 0u) shouldBeGreaterThan Version(1u, 0u, 0u, true)
+            }
+        }
+
+        describe("isSupported") {
+            it("version before current") {
+                Version(0u, 0u, 1u).isSupported().shouldBeTrue()
+                Version(0u, 0u, 7u).isSupported().shouldBeTrue()
+            }
+            it("for snapshot version, stable should not be supported") {
+                val current = Version.current
+
+                mockkObject(Version)
+                every { Version.current } returns Version(current.major, current.minor, current.patch, true)
+
+                current.stabilized.isSupported().shouldBeFalse()
+
+                unmockkObject(Version)
+            }
+            it("for stable version, snapshot should be supported") {
+                val current = Version.current
+
+                mockkObject(Version)
+                every { Version.current } returns current.stabilized
+
+                Version(current.major, current.minor, current.patch, true).isSupported().shouldBeTrue()
+
+                unmockkObject(Version)
+            }
+
+            it("newer than current") {
+                Version(1u, 0u, 0u).isSupported().shouldBeFalse()
             }
         }
     }

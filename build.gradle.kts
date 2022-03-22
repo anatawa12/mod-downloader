@@ -25,6 +25,8 @@ dependencies {
     testImplementation("io.kotest:kotest-framework-api")
     testImplementation("io.kotest:kotest-assertions-core")
 
+    testImplementation("io.mockk:mockk:1.12.3")
+
     testRuntimeOnly(platform("io.kotest:kotest-bom:5.0.3"))
     testRuntimeOnly("io.kotest:kotest-runner-junit5")
 }
