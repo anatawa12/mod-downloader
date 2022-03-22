@@ -17,18 +17,29 @@ data class Version(
         if (r != 0) return r
         if (snapshot) {
             if (!other.snapshot)
-                // SNAPSHOT < stable
+            // SNAPSHOT < stable
                 return -1 // < 0
         } else {
             if (other.snapshot)
-                // stable > SNAPSHOT
+            // stable > SNAPSHOT
                 return 1 // > 0
         }
         return 0
     }
 
+    val stabilized get() = Version(major, minor, patch, false)
+
+    fun isSupported(): Boolean {
+        // snapshot version must match stabilized version.
+        // stable version must support its snapshot versions in general
+        if (snapshot) return current.stabilized == stabilized
+        return this in supportedRange
+    }
+
     companion object {
+        val minimum = Version(0u, 0u, 0u)
         val current = parse(Constants.version)
+        val supportedRange = minimum..current
 
         fun parse(textIn: String): Version {
             try {

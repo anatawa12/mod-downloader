@@ -8,7 +8,10 @@ mod <id>
   from url "<url>"
   version <id> (<version>)
  */
-class ModsConfig(val list: List<ModInfo>) {
+class ModsConfig(
+    val version: Version?,
+    val list: List<ModInfo>,
+) {
     internal class Reader1(private val body: String) {
         var line: Int = 1
         private var index = 0
@@ -123,6 +126,7 @@ class ModsConfig(val list: List<ModInfo>) {
             kind = null
             return text!!
         }
+
         private fun getKeywordOrQuotedAndMove(): String {
             if (kind() != TokenKind.Keyword && kind() != TokenKind.Quoted) error("expected Keyword or Quoted")
             kind = null
@@ -133,9 +137,24 @@ class ModsConfig(val list: List<ModInfo>) {
 
         private fun error(message: String): Nothing = throw ParsingError(message, fileName, reader1.line)
 
-        fun parseModsConfig(): ModsConfig = ModsConfig(buildList {
-            while (kind() != null) add(parseMod())
-        })
+        fun parseModsConfig(): ModsConfig = ModsConfig(
+            version = tryParseFileVersionAndThrowErrorIfUnsupported(),
+            list = buildList { while (kind() != null) add(parseMod()) }
+        )
+
+        private fun tryParseFileVersionAndThrowErrorIfUnsupported(): Version? {
+            if (!(kind() == TokenKind.Keyword && text() != "version")) return null
+            kind = null
+            val keyword = getKeywordOrQuotedAndMove()
+            val version = try {
+                Version.parse(keyword)
+            } catch (ignored: IllegalArgumentException) {
+                error("invalid version name: $keyword")
+            }
+            if (!version.isSupported())
+                error("config file for unsupported version found! Please upgrade mod downloader! :$version")
+            return version
+        }
 
         private fun parseMod(): ModInfo {
             var optional = false
@@ -232,6 +251,7 @@ class ModsConfig(val list: List<ModInfo>) {
     sealed class ModSource
     data class CurseMod(val slug: String) : ModSource()
     data class URLPattern(val urlPattern: String) : ModSource()
+
     @Suppress("SpellCheckingInspection")
     object Optifine : ModSource()
 }
