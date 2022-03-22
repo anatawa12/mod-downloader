@@ -17,7 +17,13 @@ import kotlin.system.exitProcess
 
 fun main() = runBlocking(Dispatchers.Default) { startGui() }
 
-fun errorPanelNoExit(title: String, error: Throwable?, message: String, vararg extras: Component, parent: Component? = null) {
+fun errorPanelNoExit(
+    title: String,
+    error: Throwable?,
+    message: String,
+    vararg extras: Component,
+    parent: Component? = null,
+) {
     JOptionPane.showMessageDialog(
         parent,
         arrayOf(
@@ -35,7 +41,13 @@ fun errorPanelNoExit(title: String, error: Throwable?, message: String, vararg e
     )
 }
 
-fun errorPanel(title: String, error: Throwable?, message: String, vararg extras: Component, parent: Component? = null): Nothing {
+fun errorPanel(
+    title: String,
+    error: Throwable?,
+    message: String,
+    vararg extras: Component,
+    parent: Component? = null,
+): Nothing {
     errorPanelNoExit(title, error, message, *extras, parent = parent)
     exitProcess(-1)
 }
@@ -69,7 +81,7 @@ private suspend fun startGuiImpl() {
     } catch (e: Throwable) {
         errorPanel("Internal Error Loading Configuration", e,
             "Error Loading downloader configuration.\n" +
-                "Please make issue for mod-downloader on issue tracker with the following text below", 
+                    "Please make issue for mod-downloader on issue tracker with the following text below",
             linkButtons("Go to issue tracker" to "https://github.com/anatawa12/mod-downloader/issues/new"))
     }
 
@@ -90,7 +102,9 @@ private suspend fun startGuiImpl() {
     val mode = if (panel.mode == DownloadMode.DOWNLOAD) DownloadMode.DOWNLOAD else {
         if (modsDir.listFiles()?.isNotEmpty() == true) {
             val check = JOptionPane("you're clean downloading to non-empty directory.\n" +
-                    "Are you sure want to delete files in the directory?", JOptionPane.WARNING_MESSAGE, JOptionPane.OK_CANCEL_OPTION)
+                    "Are you sure want to delete files in the directory?",
+                JOptionPane.WARNING_MESSAGE,
+                JOptionPane.OK_CANCEL_OPTION)
             val dialog = check.createDialog("WARNING")
             dialog.defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
             dialog.isVisible = true
@@ -112,8 +126,8 @@ private suspend fun startGuiImpl() {
 
     try {
         val params = DownloadParameters(
-            downloadTo = modsDir, 
-            mode = mode, 
+            downloadTo = modsDir,
+            mode = mode,
             force = force,
             logger = progressPanel::appendLine,
             optionalModsList = panel.modList.optionalModsList,
@@ -143,7 +157,8 @@ fun getMCDir(): File {
     val mcDir = ".minecraft"
     return when {
         osType.contains("win") && System.getenv("APPDATA") != null -> File(System.getenv("APPDATA"), mcDir)
-        osType.contains("mac") -> File(userHomeDir).resolve("Library").resolve("Application Support").resolve("minecraft")
+        osType.contains("mac") -> File(userHomeDir).resolve("Library").resolve("Application Support")
+            .resolve("minecraft")
         else -> File(userHomeDir, mcDir)
     }
 }
@@ -198,7 +213,8 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
                 selectedDirText.text = dirChooser.selectedFile.path
                 onChange()
             }
-            else -> {}
+            else -> {
+            }
         }
     }
 
@@ -362,9 +378,10 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
     }
 
     private suspend fun downloadEmbedConfig(embedConfig: EmbedConfiguration) {
-        val modsConfig = loadModsConfigWithError(embedConfig.location, "Please concat the JAR provider with the following text")
-            ?: exitProcess(-1)
-        this.modsConfig = modsConfig;
+        val modsConfig =
+            loadModsConfigWithError(embedConfig.location, "Please concat the JAR provider with the following text")
+                ?: exitProcess(-1)
+        this.modsConfig = modsConfig
 
         modsListPanel.isVisible = true
         tableModelImpl.setConfig(modsConfig)
@@ -418,7 +435,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
             }
             return loadModsConfig(configLocation).also { modsConfig = it }
         } catch (e: UserError) {
-            errorPanelNoExit("Error Loading Mods List", e, 
+            errorPanelNoExit("Error Loading Mods List", e,
                 "Error Loading Config file: ${e.message}\n" + additionalMessage,
                 parent = this)
             return null
