@@ -143,7 +143,7 @@ class ModsConfig(
         )
 
         private fun tryParseFileVersionAndThrowErrorIfUnsupported(): Version? {
-            if (!(kind() == TokenKind.Keyword && text() != "version")) return null
+            if (!(kind() == TokenKind.Keyword && text() == "version")) return null
             kind = null
             val keyword = getKeywordOrQuotedAndMove()
             val version = try {
