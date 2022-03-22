@@ -218,7 +218,13 @@ abstract class ChooseFileLinePanel(name: String, private val isFile: Boolean) : 
 }
 
 class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPanel() {
-    val dialog: JDialog get() = parent.parent.parent.parent.parent.parent.parent as JDialog
+    val dialog: JDialog
+        get() = kotlin.run {
+            var cur: Container? = this
+            generateSequence { cur?.also { cur = it.parent } }
+        }
+            .filterIsInstance<JDialog>()
+            .first()
     val modList: ModListInfo
     val modsDir: ChooseFileLinePanel
     private val modeButtonGroup: ButtonGroup
