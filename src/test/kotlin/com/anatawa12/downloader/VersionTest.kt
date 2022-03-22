@@ -6,9 +6,6 @@ import io.kotest.matchers.booleans.shouldBeTrue
 import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
-import io.mockk.every
-import io.mockk.mockkObject
-import io.mockk.unmockkObject
 
 class VersionTest : DescribeSpec() {
     init {
@@ -62,25 +59,24 @@ class VersionTest : DescribeSpec() {
                 Version(0u, 0u, 1u).isSupported().shouldBeTrue()
                 Version(0u, 0u, 7u).isSupported().shouldBeTrue()
             }
+
+            val current = Version.current
+            val currentSnapshot = Version(current.major, current.minor, current.patch, true)
+            val currentStable = current.stabilized
+
             it("for snapshot version, stable should not be supported") {
-                val current = Version.current
+                TestUtils.setStaticFinal(Version::class.java, "current", currentSnapshot)
 
-                mockkObject(Version)
-                every { Version.current } returns Version(current.major, current.minor, current.patch, true)
+                currentStable.isSupported().shouldBeFalse()
 
-                current.stabilized.isSupported().shouldBeFalse()
-
-                unmockkObject(Version)
+                TestUtils.setStaticFinal(Version::class.java, "current", current)
             }
             it("for stable version, snapshot should be supported") {
-                val current = Version.current
+                TestUtils.setStaticFinal(Version::class.java, "current", currentStable)
 
-                mockkObject(Version)
-                every { Version.current } returns current.stabilized
+                currentSnapshot.isSupported().shouldBeTrue()
 
-                Version(current.major, current.minor, current.patch, true).isSupported().shouldBeTrue()
-
-                unmockkObject(Version)
+                TestUtils.setStaticFinal(Version::class.java, "current", current)
             }
 
             it("newer than current") {
