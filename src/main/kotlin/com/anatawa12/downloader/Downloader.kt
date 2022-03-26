@@ -227,46 +227,46 @@ suspend fun downloadMod(
         ModsConfig.Optifine -> computeOptifineDownloadURL(client, info.versionId, logger)
     }
 
-    val response = client.get<HttpResponse>(url)
+    return client.get<HttpStatement>(url).execute { response ->
+        val disposition = runCatching {
+            response.headers[HttpHeaders.ContentDisposition]?.let(ContentDisposition::parse)
+        }.getOrNull()
 
-    val disposition = runCatching {
-        response.headers[HttpHeaders.ContentDisposition]?.let(ContentDisposition::parse)
-    }.getOrNull()
+        if (!response.status.isSuccess())
+            throw UserError("$url returns error code: ${response.status}")
 
-    if (!response.status.isSuccess())
-        throw UserError("$url returns error code: ${response.status}")
+        val fileName = disposition?.parameter(ContentDisposition.Parameters.FileNameAsterisk)?.let(::parseRFC5987)
+            ?: disposition?.parameter(ContentDisposition.Parameters.FileName)
+            ?: url.encodedPath.substringAfterLast('/').decodeURLPart()
+        if (fileName.contains('/') || fileName.contains('\\'))
+            throw UserError("invalid file name from remote: $fileName")
 
-    val fileName = disposition?.parameter(ContentDisposition.Parameters.FileNameAsterisk)?.let(::parseRFC5987)
-        ?: disposition?.parameter(ContentDisposition.Parameters.FileName)
-                ?: url.encodedPath.substringAfterLast('/').decodeURLPart()
-    if (fileName.contains('/') || fileName.contains('\\'))
-        throw UserError("invalid file name from remote: $fileName")
+        val jarLocation = downloadTo.resolve(fileName)
 
-    val jarLocation = downloadTo.resolve(fileName)
+        if (force) jarLocation.deleteIfExists()
+        try {
+            jarLocation.createFile()
+        } catch (e: FileAlreadyExistsException) {
+            throw UserError("$fileName already exists", e)
+        }
 
-    if (force) jarLocation.deleteIfExists()
-    try {
-        jarLocation.createFile()
-    } catch (e: FileAlreadyExistsException) {
-        throw UserError("$fileName already exists", e)
-    }
+        jarLocation.toFile().writeChannel().use { response.content.copyTo(this) }
 
-    jarLocation.toFile().writeChannel().use { response.content.copyTo(this) }
-
-    when (info.source) {
-        is ModsConfig.CurseMod -> {}
-        is ModsConfig.URLPattern -> {}
-        ModsConfig.Optifine -> {
-            val bytes = ByteArray(4)
-            jarLocation.toFile().readChannel().readFully(bytes)
-            if (!bytes.contentEquals(byteArrayOf(0x50, 0x4b, 0x03, 0x04))) {
-                //runCatching { jarLocation.deleteExisting() }
-                throw IOException("invalid response")
+        when (info.source) {
+            is ModsConfig.CurseMod -> {}
+            is ModsConfig.URLPattern -> {}
+            ModsConfig.Optifine -> {
+                val bytes = ByteArray(4)
+                jarLocation.toFile().readChannel().readFully(bytes)
+                if (!bytes.contentEquals(byteArrayOf(0x50, 0x4b, 0x03, 0x04))) {
+                    //runCatching { jarLocation.deleteExisting() }
+                    throw IOException("invalid response")
+                }
             }
         }
-    }
 
-    return DownloadedMod(info.id, info.versionId, fileName)
+        DownloadedMod(info.id, info.versionId, fileName)
+    }
 }
 
 private suspend fun computeCurseDownloadURL(
