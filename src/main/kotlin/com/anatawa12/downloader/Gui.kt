@@ -85,7 +85,7 @@ private suspend fun startGuiImpl() {
             linkButtons("Go to issue tracker" to "https://github.com/anatawa12/mod-downloader/issues/new"))
     }
 
-    val panel = DownloaderPanel(getMCDir().resolve("mods").absoluteFile, embedConfig).also { panel ->
+    val panel = DownloaderPanel(findModsDir(), embedConfig).also { panel ->
         val optionPane = JOptionPane(null, JOptionPane.PLAIN_MESSAGE, JOptionPane.OK_CANCEL_OPTION)
         optionPane.message = panel
         val dialog = optionPane.createDialog(embedConfig?.windowName ?: "Mod Downloader")
@@ -149,6 +149,25 @@ private suspend fun startGuiImpl() {
     }
 
 
+}
+
+fun findModsDir(): File {
+    val jarPath = runCatching {
+        File(EmbedConfiguration::class.java.protectionDomain.codeSource.location.toURI()).absoluteFile
+    }.getOrNull()
+    if (jarPath != null) {
+        val jarDir = jarPath.parentFile
+        if (jarDir.resolve(DOWNLOADED_TXT).exists()) {
+            // if this jar is in mods directory (there's downloaded.txt)
+            return jarDir
+        }
+        if (jarDir.resolve("mods").resolve(DOWNLOADED_TXT).exists()) {
+            // if this jar is in game root directory (there's mods/downloaded.txt)
+            return jarDir
+        }
+    }
+    // fallback: default minecraft installation
+    return getMCDir().resolve("mods").absoluteFile
 }
 
 fun getMCDir(): File {
