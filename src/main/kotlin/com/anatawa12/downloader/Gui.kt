@@ -278,6 +278,7 @@ class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPane
             override fun onChange() {
                 dialog.invalidate()
                 dialog.pack()
+                detectInstalledOptionalMods()
             }
         }
         JPanel().apply {
@@ -290,6 +291,16 @@ class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPane
 
         modsDir.file = targetDir
     }
+
+    private fun detectInstalledOptionalMods() {
+        try {
+            val file = modsDir.file ?: return
+            val downloadedText = file.resolve(DOWNLOADED_TXT)
+            modList.downloadedMods = DownloadedMod.parse(downloadedText.readText())
+            modList.detectInstalledOptionalMods()
+        } catch (ignored: Exception) {
+        }
+    }
 }
 
 class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) : JPanel() {
@@ -298,6 +309,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
     private val modsListToggle: JButton?
     private val tableModelImpl: TableModelImpl
     private val serverClient: ButtonGroup
+    var downloadedMods: List<DownloadedMod> = emptyList()
     var modsConfig: ModsConfig? = null
     val optionalModsList get() = tableModelImpl.optionalModsList
     val modSide get() = enumValueOf<ModsConfig.ModSide>(serverClient.selection.actionCommand)
@@ -385,6 +397,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
 
         modsListPanel.isVisible = true
         tableModelImpl.setConfig(modsConfig)
+        detectInstalledOptionalMods()
         dialog().pack()
     }
 
@@ -420,6 +433,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
         modsListToggle.text = "Change Mod List"
         modsListPanel.isVisible = true
         tableModelImpl.setConfig(config)
+        detectInstalledOptionalMods()
         dialog().pack()
     }
 
@@ -449,10 +463,20 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
         }
     }
 
+    fun detectInstalledOptionalMods() {
+        for (downloadedMod in downloadedMods) {
+            val found = tableModelImpl.values.indexOfFirst { it.modInfo.id == downloadedMod.id }
+            if (found >= 0) {
+                tableModelImpl.setValueAt(true, found, 0)
+            }
+        }
+    }
+
     private class TableModelImpl : AbstractTableModel() {
         val headerName = arrayOf("install", "name")
         val headerClass = arrayOf(Boolean::class.javaObjectType, String::class.java)
         var values = listOf<Pair>()
+            private set
         val optionalModsList get() = values.filter { it.include }.map { it.modInfo.id }.toSet()
 
         override fun getRowCount(): Int = values.size
@@ -482,7 +506,7 @@ class ModListInfo(embedConfig: EmbedConfiguration?, val dialog: () -> JDialog) :
             fireTableRowsInserted(0, values.size)
         }
 
-        private class Pair(val modInfo: ModsConfig.ModInfo, var include: Boolean = false)
+        class Pair(val modInfo: ModsConfig.ModInfo, var include: Boolean = false)
     }
 }
 
