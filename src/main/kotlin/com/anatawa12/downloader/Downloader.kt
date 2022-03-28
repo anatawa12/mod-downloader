@@ -40,7 +40,7 @@ suspend fun doDownload(config: ModsConfig, params: DownloadParameters) =
 
 val Json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
 
-private const val DOWNLOADED_TXT = "downloaded.txt"
+const val DOWNLOADED_TXT = "downloaded.txt"
 
 private fun checkDownloadToDir(
     downloadTo: Path,
