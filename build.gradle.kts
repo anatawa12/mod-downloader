@@ -21,7 +21,7 @@ dependencies {
     implementation("io.ktor:ktor-io")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.2")
 
-    testImplementation(platform("io.kotest:kotest-bom:5.2.1"))
+    testImplementation(platform("io.kotest:kotest-bom:5.2.2"))
     testImplementation("io.kotest:kotest-framework-api")
     testImplementation("io.kotest:kotest-assertions-core")
 
