@@ -163,7 +163,7 @@ fun findModsDir(): File {
         }
         if (jarDir.resolve("mods").resolve(DOWNLOADED_TXT).exists()) {
             // if this jar is in game root directory (there's mods/downloaded.txt)
-            return jarDir
+            return jarDir.resolve("mods")
         }
     }
     // fallback: default minecraft installation
@@ -309,6 +309,7 @@ class DownloaderPanel(targetDir: File, embedConfig: EmbedConfiguration?) : JPane
         }.also(::add)
 
         modsDir.file = targetDir
+        detectInstalledOptionalMods()
     }
 
     private fun detectInstalledOptionalMods() {
