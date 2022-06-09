@@ -1,6 +1,6 @@
 plugins {
     kotlin("jvm") version "1.6.10"
-    kotlin("plugin.serialization") version "1.6.10"
+    kotlin("plugin.serialization") version "1.7.0"
     id("com.anatawa12.compile-time-constant") version "1.0.5"
     id("com.github.johnrengelman.shadow") version "7.1.2"
     application
