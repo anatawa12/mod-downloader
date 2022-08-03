@@ -1,6 +1,6 @@
 package com.anatawa12.downloader
 
-data class DownloadedMod(val id: String, val versionId: String, val fileName: String) {
+data class DownloadedMod(val id: String, val versionId: String, val files: List<String>) {
     companion object {
         fun parse(text: String): List<DownloadedMod> = buildList {
             val seq = text.lineSequence().iterator()
@@ -13,7 +13,7 @@ data class DownloadedMod(val id: String, val versionId: String, val fileName: St
             for (line in seq) {
                 val elements = line.split('"')
                 if (elements.size >= 3) {
-                    add(DownloadedMod(elements[0], elements[1], elements[2]))
+                    add(DownloadedMod(elements[0], elements[1], elements.drop(2)))
                 }
             }
         }
@@ -24,8 +24,9 @@ data class DownloadedMod(val id: String, val versionId: String, val fileName: St
             for (downloadedMod in downloadedMods) {
                 append(downloadedMod.id)
                     .append('"').append(downloadedMod.versionId)
-                    .append('"').append(downloadedMod.fileName)
-                    .appendLine()
+                for (file in downloadedMod.files)
+                    append('"').append(file)
+                appendLine()
             }
         }
     }

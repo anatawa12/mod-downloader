@@ -60,13 +60,16 @@ private fun checkDownloadToDir(
             downloadedList = if (downloadedListStr == null) emptyList() else {
                 val parsed = DownloadedMod.parse(downloadedListStr)
                 parsed.filter {
-                    val path = downloadTo.resolve(it.fileName)
-                    if (path.exists()) {
-                        true
-                    } else {
-                        logger.log("WARNING: ${it.fileName}(${it.id} version ${it.versionId}) not found in directory.")
-                        false
+                    var exists = false
+                    for (file in it.files) {
+                        val path = downloadTo.resolve(file)
+                        if (path.exists()) {
+                            exists = true
+                        } else {
+                            logger.log("WARNING: ${file}(${it.id} version ${it.versionId}) not found in directory.")
+                        }
                     }
+                    exists
                 }
             }
         }
@@ -130,7 +133,9 @@ suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
 private fun deleteAll(removed: List<DownloadedMod>, downloadTo: Path) {
     if (removed.isNotEmpty()) {
         for (downloadedMod in removed) {
-            downloadTo.resolve(downloadedMod.fileName).deleteIfExists()
+            for (file in downloadedMod.files) {
+                downloadTo.resolve(file).deleteIfExists()
+            }
         }
     }
 }
@@ -265,7 +270,7 @@ suspend fun downloadMod(
             }
         }
 
-        DownloadedMod(info.id, info.versionId, fileName)
+        DownloadedMod(info.id, info.versionId, listOf(fileName))
     }
 }
 
