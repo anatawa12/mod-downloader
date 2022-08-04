@@ -309,7 +309,7 @@ private fun computeModDiff(
 private fun parseRFC5987(text: String): String? = runCatching {
     val pair = text.split('\'', limit = 3)
     if (pair.size < 3) return null
-    return pair[1].decodeURLPart(charset = Charset.forName(pair[0]))
+    return pair[2].decodeURLPart(charset = Charset.forName(pair[0]))
 }.getOrNull()
 
 fun interface Logger {
