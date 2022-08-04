@@ -2,7 +2,6 @@ package com.anatawa12.downloader
 
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
-import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.util.cio.*
@@ -21,7 +20,6 @@ import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.*
-import kotlin.time.Duration.Companion.seconds
 
 class DownloadParameters(
     val downloadTo: File,
@@ -60,16 +58,20 @@ private fun checkDownloadToDir(
             downloadedList = if (downloadedListStr == null) emptyList() else {
                 val parsed = DownloadedMod.parse(downloadedListStr)
                 parsed.filter {
-                    val path = downloadTo.resolve(it.fileName)
-                    if (path.exists()) {
-                        true
-                    } else {
-                        logger.log("WARNING: ${it.fileName}(${it.id} version ${it.versionId}) not found in directory.")
-                        false
+                    var missing = false
+                    for (file in it.files) {
+                        val path = downloadTo.resolve(file)
+                        if (!path.exists()) {
+                            logger.log("WARNING: some file of ${it.id} version ${it.versionId}(${file}) not found in directory.")
+                            missing = true
+                            break
+                        }
                     }
+                    !missing
                 }
             }
         }
+
         DownloadMode.CLEAN_DOWNLOAD -> {
             val entries = downloadTo.listDirectoryEntries()
             if (force) {
@@ -113,6 +115,7 @@ suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
                 throw UserError("config file not found: ${config.path}")
             }
         }
+
         is ModsFileLocation.InJar,
         is ModsFileLocation.GlobalURL,
         -> {
@@ -130,7 +133,9 @@ suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
 private fun deleteAll(removed: List<DownloadedMod>, downloadTo: Path) {
     if (removed.isNotEmpty()) {
         for (downloadedMod in removed) {
-            downloadTo.resolve(downloadedMod.fileName).deleteIfExists()
+            for (file in downloadedMod.files) {
+                downloadTo.resolve(file).deleteIfExists()
+            }
         }
     }
 }
@@ -159,8 +164,10 @@ private suspend fun download(
                         logger.log("downloading ${info.id} version ${info.versionName ?: info.versionId}")
                         downloaded += downloadMod(client, info, downloadTo, force, logger)
                     } finally {
-                        logger.log("download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
-                                "${info.id} version ${info.versionName ?: info.versionId}")
+                        logger.log(
+                            "download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
+                                    "${info.id} version ${info.versionName ?: info.versionId}"
+                        )
                     }
                 }
             }.awaitAll()
@@ -188,7 +195,7 @@ private suspend fun <A> doDownloadImpl(
     val modsConfig = load(config)
 
     val (updated, removed, keep) = computeModDiff(
-        filterMods(modsConfig.list, params.optionalModsList, params.downloadFor), 
+        filterMods(modsConfig.list, params.optionalModsList, params.downloadFor),
         downloadedList,
     )
 
@@ -214,6 +221,20 @@ private suspend fun <A> doDownloadImpl(
 @Serializable
 data class CFWidgetResponse(val id: Int? = null, val error: String? = null)
 
+fun getFileName(url: Url, response: HttpResponse): String {
+    val disposition = runCatching {
+        response.headers[HttpHeaders.ContentDisposition]?.let(ContentDisposition::parse)
+    }.getOrNull()
+
+    val fileName = disposition?.parameter(ContentDisposition.Parameters.FileNameAsterisk)?.let(::parseRFC5987)
+        ?: disposition?.parameter(ContentDisposition.Parameters.FileName)
+        ?: url.encodedPath.substringAfterLast('/').decodeURLPart()
+    if (fileName.contains('/') || fileName.contains('\\'))
+        throw UserError("invalid file name from remote: $fileName")
+
+    return fileName
+}
+
 suspend fun downloadMod(
     client: HttpClient,
     info: ModsConfig.ModInfo,
@@ -221,118 +242,21 @@ suspend fun downloadMod(
     force: Boolean,
     logger: Logger,
 ): DownloadedMod {
-    val url = when (val source = info.source) {
-        is ModsConfig.CurseMod -> computeCurseDownloadURL(client, source.slug, info.id, info.versionId, logger)
-        is ModsConfig.URLPattern -> computeUrlPatternDownloadURL(source.urlPattern, info.id, info.versionId, logger)
-        ModsConfig.Optifine -> computeOptifineDownloadURL(client, info.versionId, logger)
-    }
-
-    return client.get<HttpStatement>(url).execute { response ->
-        val disposition = runCatching {
-            response.headers[HttpHeaders.ContentDisposition]?.let(ContentDisposition::parse)
-        }.getOrNull()
-
-        if (!response.status.isSuccess())
-            throw UserError("$url returns error code: ${response.status}")
-
-        val fileName = disposition?.parameter(ContentDisposition.Parameters.FileNameAsterisk)?.let(::parseRFC5987)
-            ?: disposition?.parameter(ContentDisposition.Parameters.FileName)
-            ?: url.encodedPath.substringAfterLast('/').decodeURLPart()
-        if (fileName.contains('/') || fileName.contains('\\'))
-            throw UserError("invalid file name from remote: $fileName")
-
-        val jarLocation = downloadTo.resolve(fileName)
-
+    val files = mutableListOf<String>()
+    info.source.doDownload(client, info, logger) { filePath, content ->
+        val jarLocation = downloadTo.resolve(filePath)
         if (force) jarLocation.deleteIfExists()
+        jarLocation.parent.createDirectories()
         try {
             jarLocation.createFile()
         } catch (e: FileAlreadyExistsException) {
-            throw UserError("$fileName already exists", e)
+            throw UserError("$filePath already exists", e)
         }
 
-        jarLocation.toFile().writeChannel().use { response.content.copyTo(this) }
-
-        when (info.source) {
-            is ModsConfig.CurseMod -> {}
-            is ModsConfig.URLPattern -> {}
-            ModsConfig.Optifine -> {
-                val bytes = ByteArray(4)
-                jarLocation.toFile().readChannel().readFully(bytes)
-                if (!bytes.contentEquals(byteArrayOf(0x50, 0x4b, 0x03, 0x04))) {
-                    //runCatching { jarLocation.deleteExisting() }
-                    throw IOException("invalid response")
-                }
-            }
-        }
-
-        DownloadedMod(info.id, info.versionId, fileName)
+        jarLocation.toFile().writeChannel().use { content.copyTo(this) }
+        files += filePath
     }
-}
-
-private suspend fun computeCurseDownloadURL(
-    client: HttpClient,
-    slug: String,
-    id: String,
-    versionId: String,
-    logger: Logger,
-): Url {
-    val cfWidgetURL = URLBuilder("https://api.cfwidget.com/")
-        .path("minecraft", "mc-mods", slug)
-        .build()
-    val projectId = run {
-        while (true) {
-            logger.log("fetching project id and file info from cfwidget for $id")
-            val resJson = client.get<String>(cfWidgetURL)
-            val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
-            if (res.id != null) return@run res.id
-            if (res.error != "in_queue")
-                throw IOException("unknown response from cfwidget: ${res.error}")
-            delay(10.seconds.inWholeMilliseconds)
-        }
-        @Suppress("UNREACHABLE_CODE") // compiler bug
-        error("unreachable")
-    }
-    logger.log("fetching download url for $id")
-    val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/")
-        .path("api", "v2", "addon", projectId.toString(), "file", versionId, "download-url")
-        .build()
-    return client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8).let(::Url)
-}
-
-@Suppress("RedundantSuspendModifier")
-private suspend fun computeUrlPatternDownloadURL(
-    urlPattern: String,
-    id: String,
-    versionId: String,
-    logger: Logger,
-): Url {
-    val url = urlPattern.replace("\$version", versionId)
-    logger.log("fetching download url for $id: $url")
-    return Url(url)
-}
-
-private suspend fun computeOptifineDownloadURL(client: HttpClient, versionId: String, logger: Logger): Url {
-    val adloadx = URLBuilder("https://optifine.net/adloadx")
-        .apply { parameters["f"] = "OptiFine_${versionId}.jar" }
-        .build()
-    logger.log("fetching download url for optifine $versionId")
-    val resHTML = client.get<String>(adloadx)
-
-    val aLine = resHTML.lineSequence()
-        .dropWhile { !it.contains("class=\"downloadButton\"") }
-        .drop(1)
-        .dropWhile { !it.contains("<a") }
-        .firstOrNull()
-        ?: throw IOException("unknown response from optifine.net: no download button: $resHTML")
-
-    val regex = "<a [^>]*href=['\"]([^'\"]*)['\"]".toRegex()
-    val match = regex.find(aLine)
-        ?: throw IOException("unknown response from optifine.net: no a tag: $aLine")
-    val href = match.groups[1]!!.value
-    logger.log("href: $href")
-    val download = URLBuilder(adloadx).takeFrom(href).build()
-    logger.log("downloading optifine: $download")
-    return download
+    return DownloadedMod(info.id, info.versionId, files)
 }
 
 private fun filterMods(
@@ -357,6 +281,7 @@ private fun computeModDiff(
         return Triple(mods, emptyList(), emptyList())
 
     data class ModInfoPair(val modInfo: ModsConfig.ModInfo? = null, var downloadedMod: DownloadedMod? = null)
+
     val modMap = mutableMapOf<Pair<String, String>, ModInfoPair>()
 
     for (modInfo in mods) {
@@ -389,7 +314,7 @@ private fun computeModDiff(
 private fun parseRFC5987(text: String): String? = runCatching {
     val pair = text.split('\'', limit = 3)
     if (pair.size < 3) return null
-    return pair[1].decodeURLPart(charset = Charset.forName(pair[0]))
+    return pair[2].decodeURLPart(charset = Charset.forName(pair[0]))
 }.getOrNull()
 
 fun interface Logger {
@@ -403,6 +328,7 @@ enum class DownloadMode {
 
 sealed class ModsFileLocation {
     abstract val url: URL
+
     data class InJar(val path: String, override val url: URL) : ModsFileLocation()
     data class GlobalURL(override val url: URL) : ModsFileLocation()
     data class FileSystem(val path: File) : ModsFileLocation() {
