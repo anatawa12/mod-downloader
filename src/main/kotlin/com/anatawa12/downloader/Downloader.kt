@@ -58,19 +58,20 @@ private fun checkDownloadToDir(
             downloadedList = if (downloadedListStr == null) emptyList() else {
                 val parsed = DownloadedMod.parse(downloadedListStr)
                 parsed.filter {
-                    var exists = false
+                    var missing = false
                     for (file in it.files) {
                         val path = downloadTo.resolve(file)
-                        if (path.exists()) {
-                            exists = true
-                        } else {
-                            logger.log("WARNING: ${file}(${it.id} version ${it.versionId}) not found in directory.")
+                        if (!path.exists()) {
+                            logger.log("WARNING: some file of ${it.id} version ${it.versionId}(${file}) not found in directory.")
+                            missing = true
+                            break
                         }
                     }
-                    exists
+                    !missing
                 }
             }
         }
+
         DownloadMode.CLEAN_DOWNLOAD -> {
             val entries = downloadTo.listDirectoryEntries()
             if (force) {
@@ -114,6 +115,7 @@ suspend fun loadModsConfig(config: ModsFileLocation): ModsConfig {
                 throw UserError("config file not found: ${config.path}")
             }
         }
+
         is ModsFileLocation.InJar,
         is ModsFileLocation.GlobalURL,
         -> {
@@ -162,8 +164,10 @@ private suspend fun download(
                         logger.log("downloading ${info.id} version ${info.versionName ?: info.versionId}")
                         downloaded += downloadMod(client, info, downloadTo, force, logger)
                     } finally {
-                        logger.log("download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
-                                "${info.id} version ${info.versionName ?: info.versionId}")
+                        logger.log(
+                            "download complete: ${completeCount.incrementAndGet()} / $updatedCount: " +
+                                    "${info.id} version ${info.versionName ?: info.versionId}"
+                        )
                     }
                 }
             }.awaitAll()
@@ -191,7 +195,7 @@ private suspend fun <A> doDownloadImpl(
     val modsConfig = load(config)
 
     val (updated, removed, keep) = computeModDiff(
-        filterMods(modsConfig.list, params.optionalModsList, params.downloadFor), 
+        filterMods(modsConfig.list, params.optionalModsList, params.downloadFor),
         downloadedList,
     )
 
@@ -277,6 +281,7 @@ private fun computeModDiff(
         return Triple(mods, emptyList(), emptyList())
 
     data class ModInfoPair(val modInfo: ModsConfig.ModInfo? = null, var downloadedMod: DownloadedMod? = null)
+
     val modMap = mutableMapOf<Pair<String, String>, ModInfoPair>()
 
     for (modInfo in mods) {
@@ -323,6 +328,7 @@ enum class DownloadMode {
 
 sealed class ModsFileLocation {
     abstract val url: URL
+
     data class InJar(val path: String, override val url: URL) : ModsFileLocation()
     data class GlobalURL(override val url: URL) : ModsFileLocation()
     data class FileSystem(val path: File) : ModsFileLocation() {
