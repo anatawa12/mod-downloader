@@ -25,6 +25,12 @@ mod <id>
 mod <id>
   from url "<url>"
   version <id> (<version>)
+mod <id>
+    from zip
+        from drive <file-id>
+            of "mcheli"
+            into "mcheli"
+    version 1.0.4
  */
 class ModsConfig(
     val version: Version?,
