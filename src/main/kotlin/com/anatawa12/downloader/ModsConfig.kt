@@ -1,5 +1,17 @@
 package com.anatawa12.downloader
 
+import io.ktor.client.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.utils.io.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
+import java.io.IOException
+import kotlin.time.Duration.Companion.seconds
+
 /*
 mod <id>
   from curse <slug>
@@ -80,16 +92,19 @@ class ModsConfig(
                     text = reader1.readUntil { it == ')' }
                     if (reader1.read() != ')'.code) error("Unexpected EOF")
                 }
+
                 '"'.code -> {
                     kind = TokenKind.Quoted
                     text = reader1.readUntil { it == '"' }
                     if (reader1.read() != '"'.code) error("Unexpected EOF")
                 }
+
                 '\''.code -> {
                     kind = TokenKind.Quoted
                     text = reader1.readUntil { it == '\'' }
                     if (reader1.read() != '"'.code) error("Unexpected EOF")
                 }
+
                 else -> {
                     reader1.back()
                     kind = TokenKind.Keyword
@@ -166,21 +181,25 @@ class ModsConfig(
                         kind = null
                         break
                     }
+
                     "optional" -> {
                         if (optional) error("multiple optional")
                         kind = null
                         optional = true
                     }
+
                     "server" -> {
                         if (side != null) error("multiple server or client")
                         kind = null
                         side = ModSide.SERVER
                     }
+
                     "client" -> {
                         if (side != null) error("multiple server or client")
                         kind = null
                         side = ModSide.CLIENT
                     }
+
                     else -> error("unknown mod modifier: $text")
                 }
             }
@@ -201,12 +220,14 @@ class ModsConfig(
                             else -> error("unexpected mod source kind: '$kind'")
                         }
                     }
+
                     "version" -> {
                         if (versionId != null) error("multiple from")
                         kind = null
                         versionId = getKeywordOrQuotedAndMove()
                         versionName = tryParenthesized()
                     }
+
                     else -> break
                 }
             }
@@ -248,10 +269,155 @@ class ModsConfig(
         CLIENT,
     }
 
-    sealed class ModSource
-    data class CurseMod(val slug: String) : ModSource()
-    data class URLPattern(val urlPattern: String) : ModSource()
+    sealed class ModSource {
+        abstract suspend fun doDownload(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> Unit
+        )
+    }
+
+
+    sealed class SingleJarModSource : ModSource() {
+        override suspend fun doDownload(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> Unit
+        ) {
+            doDownloadSingleJar(client, info, logger, callback)
+        }
+
+        abstract suspend fun <T> doDownloadSingleJar(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> T
+        ): T
+    }
+
+    data class CurseMod(val slug: String) : SingleJarModSource() {
+        override suspend fun <T> doDownloadSingleJar(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> T
+        ): T {
+            val cfWidgetURL = URLBuilder("https://api.cfwidget.com/")
+                .path("minecraft", "mc-mods", slug)
+                .build()
+            val projectId = run {
+                while (true) {
+                    logger.log("fetching project id and file info from cfwidget for ${info.id}")
+                    val resJson = client.get<String>(cfWidgetURL)
+                    val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
+                    if (res.id != null) return@run res.id
+                    if (res.error != "in_queue")
+                        throw IOException("unknown response from cfwidget: ${res.error}")
+                    delay(10.seconds.inWholeMilliseconds)
+                }
+                @Suppress("UNREACHABLE_CODE") // compiler bug
+                error("unreachable")
+            }
+
+            logger.log("fetching download url for ${info.id}")
+
+            val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/")
+                .path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
+                .build()
+
+            val jarURL = client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8).let(::Url)
+
+            return client.get<HttpStatement>(jarURL).execute { response ->
+                if (!response.status.isSuccess())
+                    throw UserError("$jarURL returns error code: ${response.status}")
+
+                val fileName = getFileName(jarURL, response)
+                callback(fileName, response.content)
+            }
+        }
+    }
+
+    data class URLPattern(val urlPattern: String) : SingleJarModSource() {
+        override suspend fun <T> doDownloadSingleJar(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> T
+        ): T {
+            val url = urlPattern.replace("\$version", info.versionId)
+            logger.log("fetching download url for ${info.id}: $url")
+            val jarURL = Url(url)
+            return client.get<HttpStatement>(jarURL).execute { response ->
+                if (!response.status.isSuccess())
+                    throw UserError("$jarURL returns error code: ${response.status}")
+
+                val fileName = getFileName(jarURL, response)
+                callback(fileName, response.content)
+            }
+        }
+    }
 
     @Suppress("SpellCheckingInspection")
-    object Optifine : ModSource()
+    object Optifine : SingleJarModSource() {
+        override suspend fun <T> doDownloadSingleJar(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> T
+        ): T {
+            val adloadx = URLBuilder("https://optifine.net/adloadx")
+                .apply { parameters["f"] = "OptiFine_${info.versionId}.jar" }
+                .build()
+            logger.log("fetching download url for optifine ${info.versionId}")
+            val resHTML = client.get<String>(adloadx)
+
+            val aLine = resHTML.lineSequence()
+                .dropWhile { !it.contains("class=\"downloadButton\"") }
+                .drop(1)
+                .dropWhile { !it.contains("<a") }
+                .firstOrNull()
+                ?: throw IOException("unknown response from optifine.net: no download button: $resHTML")
+
+            val regex = "<a [^>]*href=['\"]([^'\"]*)['\"]".toRegex()
+            val match = regex.find(aLine)
+                ?: throw IOException("unknown response from optifine.net: no a tag: $aLine")
+            val href = match.groups[1]!!.value
+            logger.log("href: $href")
+            val jarURL = URLBuilder(adloadx).takeFrom(href).build()
+            logger.log("downloading optifine: $jarURL")
+
+            return client.get<HttpStatement>(jarURL).execute { response ->
+                if (!response.status.isSuccess())
+                    throw UserError("$jarURL returns error code: ${response.status}")
+
+                val fileName = getFileName(jarURL, response)
+                val content = response.content
+                val result = ByteChannel(false)
+
+                // check jar header.
+                val bytes = ByteArray(4)
+                content.readFully(bytes)
+                if (!bytes.contentEquals(byteArrayOf(0x50, 0x4b, 0x03, 0x04))) {
+                    //runCatching { jarLocation.deleteExisting() }
+                    throw IOException("invalid response")
+                }
+
+                coroutineScope {
+                    async {
+                        try {
+                            result.writeFully(bytes)
+                        } catch (t: Throwable) {
+                            result.close(t)
+                            throw t
+                        }
+                        content.copyTo(result)
+                        result.close()
+                    }.job
+                    callback(fileName, result)
+                }
+            }
+        }
+    }
 }
