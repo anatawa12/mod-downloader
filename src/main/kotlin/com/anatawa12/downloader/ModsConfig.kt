@@ -6,12 +6,16 @@ import io.ktor.client.features.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import io.ktor.util.*
 import io.ktor.utils.io.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.job
+import java.io.ByteArrayInputStream
 import java.io.IOException
+import java.util.zip.ZipInputStream
+import kotlin.io.path.Path
 import kotlin.time.Duration.Companion.seconds
 
 /*
@@ -216,11 +220,8 @@ class ModsConfig(
                         if (source != null) error("multiple from")
                         kind = null
                         source = when (val kind = getKeywordAndMove().lowercase()) {
-                            "curse" -> parseCurseModSource()
-                            "url" -> parseUrlModSource()
-                            "optifine" -> parseOptifineModSource()
-                            "drive" -> parseGoogleDriveModSource()
-                            else -> error("unexpected mod source kind: '$kind'")
+                            "zip" -> parseZipModSource()
+                            else -> parseSingleJarModSource(kind)
                         }
                     }
 
@@ -238,6 +239,54 @@ class ModsConfig(
             if (versionId == null) error("expected 'version'")
             return ModInfo(id, source, versionId, versionName, optional, side)
         }
+
+        // zip from <single> of <pathInJar: str> into <destPath: str>
+        private fun parseZipModSource(): ZipModSource {
+            var from: SingleJarModSource? = null
+            var pathInJar: String? = null
+            var destPath: String? = null
+
+            while (true) {
+                if (kind() != TokenKind.Keyword) break
+                when (text()?.lowercase()) {
+                    "from" -> {
+                        kind = null
+                        from = parseSingleJarModSource()
+                    }
+
+                    "of" -> {
+                        kind = null
+                        pathInJar = getKeywordOrQuotedAndMove()
+                    }
+
+                    "into" -> {
+                        kind = null
+                        destPath = getKeywordOrQuotedAndMove()
+                    }
+
+                    else -> break
+                }
+            }
+
+            if (from == null) error("expected 'from'")
+            if (destPath == null) error("expected 'into'")
+            if (pathInJar == null) pathInJar = ""
+            if (pathInJar.isNotEmpty() && !pathInJar.endsWith("/")) {
+                pathInJar = "$pathInJar/"
+            }
+
+            return ZipModSource(from, pathInJar, destPath)
+        }
+
+        @Suppress("NAME_SHADOWING")
+        private fun parseSingleJarModSource(kind: String? = null): SingleJarModSource =
+            when (val kind = kind ?: getKeywordAndMove().lowercase()) {
+                "curse" -> parseCurseModSource()
+                "url" -> parseUrlModSource()
+                "optifine" -> parseOptifineModSource()
+                "drive" -> parseGoogleDriveModSource()
+                else -> error("unexpected mod source kind: '$kind'")
+            }
 
         private fun parseCurseModSource(): CurseMod = CurseMod(getKeywordOrQuotedAndMove())
 
@@ -283,6 +332,53 @@ class ModsConfig(
         )
     }
 
+    data class ZipModSource(
+        val source: SingleJarModSource,
+        val pathInJar: String,
+        val destPath: String,
+    ) : ModSource() {
+        override suspend fun doDownload(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> Unit
+        ) {
+            val zipFile = source.doDownloadSingleJar(client, info, logger) { _, content -> content.toByteArray() }
+            ZipInputStream(ByteArrayInputStream(zipFile)).use { zis ->
+                while (true) {
+                    val entry = zis.nextEntry ?: break
+                    if (!entry.isDirectory) {
+                        var normalized = normalizePath(entry.name)
+                        if (pathInJar.isNotEmpty() && normalized.startsWith(pathInJar)) {
+                            normalized = normalized.substring(pathInJar.length)
+                        }
+                        callback(Path(destPath).resolve(normalized).toString(), ByteReadChannel(zis.readBytes()))
+                    }
+                }
+            }
+        }
+
+        private fun normalizePath(name: String): String = buildString {
+            for (cur in name.splitToSequence('/')) {
+                when (cur) {
+                    ".." -> {
+                        // skip '/../'
+                        // find last slash. 'something/' -> ''
+                        val lastSlash = this.lastIndexOf('/', lastIndex - 1)
+                        setLength(lastSlash + 1)
+                    }
+
+                    ".", "" -> {
+                        // skip '/./' or '//'
+                    }
+
+                    else -> append(cur).append('/')
+                }
+            }
+            // remove last slash
+            setLength(length - 1)
+        }
+    }
 
     sealed class SingleJarModSource : ModSource() {
         override suspend fun doDownload(
