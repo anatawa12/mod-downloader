@@ -1,6 +1,8 @@
 package com.anatawa12.downloader
 
 import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.features.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -217,6 +219,7 @@ class ModsConfig(
                             "curse" -> parseCurseModSource()
                             "url" -> parseUrlModSource()
                             "optifine" -> parseOptifineModSource()
+                            "drive" -> parseGoogleDriveModSource()
                             else -> error("unexpected mod source kind: '$kind'")
                         }
                     }
@@ -241,6 +244,8 @@ class ModsConfig(
         private fun parseUrlModSource(): URLPattern = URLPattern(getKeywordOrQuotedAndMove())
 
         private fun parseOptifineModSource(): Optifine = Optifine
+
+        private fun parseGoogleDriveModSource(): GoogleDrive = GoogleDrive(getKeywordOrQuotedAndMove())
 
         enum class TokenKind {
             Keyword,
@@ -335,6 +340,67 @@ class ModsConfig(
 
                 val fileName = getFileName(jarURL, response)
                 callback(fileName, response.content)
+            }
+        }
+    }
+
+    data class GoogleDrive(val id: String) : SingleJarModSource() {
+        companion object {
+            val href = "href=\"(/uc\\?export=download[^\"]+)".toRegex()
+            val downloadForm = "id=\"downloadForm\" action=\"(.+?)\"".toRegex()
+            val downloadUrl = "\"downloadUrl\":\"([^\"]+)".toRegex()
+        }
+
+        private fun findPublicURL(receive: String): String {
+            receive.lineSequence().forEach { line ->
+                href.find(line)?.let { match ->
+                    return "https://docs.google.com" + match.groups[1]!!.value.replace("&amp;", "&")
+                }
+                downloadForm.find(line)?.let { match ->
+                    return match.groups[1]!!.value.replace("&amp;", "&")
+                }
+                downloadUrl.find(line)?.let { match ->
+                    return match.groups[1]!!.value.replace("\\u003d", "=").replace("\\u0026", "&")
+                }
+            }
+            throw UserError("cannot find download url for google drive id=$id")
+        }
+
+        override suspend fun <T> doDownloadSingleJar(
+            client: HttpClient,
+            info: ModInfo,
+            logger: Logger,
+            callback: suspend (String, ByteReadChannel) -> T
+        ): T {
+            val cookieStorage = AcceptAllCookiesStorage()
+            var url: Url?
+            url = Url("https://drive.google.com/uc?export=download&id=$id")
+            while (true) {
+                val result = client.get<HttpStatement>(url!!) {
+                    val cookies = cookieStorage.get(url!!)
+                    if (cookies.isNotEmpty()) {
+                        headers[HttpHeaders.Cookie] = cookies.joinToString(";", transform = ::renderCookieHeader)
+                    } else {
+                        headers.remove(HttpHeaders.Cookie)
+                    }
+                }.execute { response ->
+                    val contentType =
+                        runCatching { response.headers[HttpHeaders.ContentType]?.let(ContentType::parse) }.getOrNull()
+                    if (contentType?.contentSubtype?.contains("html") != true) {
+                        url = null
+                        return@execute callback(getFileName(response.request.url, response), response.content)
+                    } else {
+                        val firstUrl = response.request.url
+                        response.setCookie().forEach {
+                            cookieStorage.addCookie(firstUrl, it)
+                        }
+                        url = Url(findPublicURL(response.receive()))
+                        null
+                    }
+                }
+                @Suppress("UNCHECKED_CAST")
+                if (url == null)
+                    return result as T
             }
         }
     }
