@@ -417,12 +417,12 @@ class ModsConfig(
                     path("minecraft", "mc-mods", slug)
                 }
             }
-            val projectId = run {
+            val projectInfo = run {
                 while (true) {
                     logger.log("fetching project id and file info from cfwidget for ${info.id}")
                     val resJson = client.get(cfWidgetRequest).bodyAsText()
                     val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
-                    if (res.id != null) return@run res.id
+                    if (res.id != null) return@run res
                     if (res.error != "in_queue")
                         throw IOException("unknown response from cfwidget: ${res.error}")
                     delay(10.seconds.inWholeMilliseconds)
@@ -433,17 +433,19 @@ class ModsConfig(
 
             logger.log("fetching download url for ${info.id}")
 
-            val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/").apply {
-                path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
-            }.build()
+            val fileInfo = projectInfo.files.firstOrNull { it.id.toString() == info.versionId }
+                ?: throw UserError("version ${info.versionId} not found in $slug (${projectInfo.id})")
 
-            val jarURL = client.get(downloadURL).body<ByteArray>().toString(Charsets.UTF_8).let(::Url)
+            val versionId = info.versionId
+            val jarURL = "https://edge.forgecdn.net/files/" +
+                    versionId.chunked(4).joinToString("/") + "/" +
+                    fileInfo.name.encodeURLPath()
 
             return client.prepareGet(jarURL).execute { response ->
                 if (!response.status.isSuccess())
                     throw UserError("$jarURL returns error code: ${response.status}")
 
-                val fileName = getFileName(jarURL, response)
+                val fileName = getFileName(Url(jarURL), response)
                 callback(fileName, response.bodyAsChannel())
             }
         }

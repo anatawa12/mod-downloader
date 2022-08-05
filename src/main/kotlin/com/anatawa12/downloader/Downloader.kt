@@ -219,7 +219,10 @@ private suspend fun <A> doDownloadImpl(
 }
 
 @Serializable
-data class CFWidgetResponse(val id: Int? = null, val error: String? = null)
+data class CFWidgetResponse(val id: Int? = null, val files: List<CFWidgetFileInfo>, val error: String? = null)
+
+@Serializable
+data class CFWidgetFileInfo(val id: Int, val name: String)
 
 fun getFileName(url: Url, response: HttpResponse): String {
     val disposition = runCatching {
