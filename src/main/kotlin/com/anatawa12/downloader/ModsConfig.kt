@@ -294,7 +294,24 @@ class ModsConfig(
                 else -> error("unexpected mod source kind: '$kind'")
             }
 
-        private fun parseCurseModSource(): CurseMod = CurseMod(getKeywordOrQuotedAndMove())
+        private fun parseCurseModSource(): CurseMod {
+            val slug = getKeywordOrQuotedAndMove()
+            var fileName: String? = null
+
+            while (true) {
+                if (kind() != TokenKind.Keyword) break
+                when (text()?.lowercase()) {
+                    "filename" -> {
+                        kind = null
+                        fileName = getKeywordOrQuotedAndMove()
+                    }
+
+                    else -> break
+                }
+            }
+
+            return CurseMod(slug, fileName)
+        }
 
         private fun parseUrlModSource(): URLPattern = URLPattern(getKeywordOrQuotedAndMove())
 
@@ -404,7 +421,7 @@ class ModsConfig(
         ): T
     }
 
-    data class CurseMod(val slug: String) : SingleJarModSource() {
+    data class CurseMod(val slug: String, val fileName: String?) : SingleJarModSource() {
         override suspend fun <T> doDownloadSingleJar(
             client: HttpClient,
             info: ModInfo,
@@ -417,12 +434,12 @@ class ModsConfig(
                     path("minecraft", "mc-mods", slug)
                 }
             }
-            val projectId = run {
+            val projectInfo = run {
                 while (true) {
                     logger.log("fetching project id and file info from cfwidget for ${info.id}")
                     val resJson = client.get(cfWidgetRequest).bodyAsText()
                     val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
-                    if (res.id != null) return@run res.id
+                    if (res.id != null) return@run res
                     if (res.error != "in_queue")
                         throw IOException("unknown response from cfwidget: ${res.error}")
                     delay(10.seconds.inWholeMilliseconds)
@@ -433,18 +450,23 @@ class ModsConfig(
 
             logger.log("fetching download url for ${info.id}")
 
-            val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/").apply {
-                path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
-            }.build()
+            val fileName = projectInfo.files.firstOrNull { it.id.toString() == info.versionId }?.name
+                ?: fileName
+                ?: throw UserError(
+                    "version ${info.versionId} not found in $slug (${projectInfo.id})\n" +
+                            "Please tell server administer to update mods config filename."
+                )
 
-            val jarURL = client.get(downloadURL).body<ByteArray>().toString(Charsets.UTF_8).let(::Url)
+            val versionId = info.versionId
+            val jarURL = "https://edge.forgecdn.net/files/" +
+                    versionId.chunked(4).joinToString("/") + "/" +
+                    fileName.encodeURLPath()
 
             return client.prepareGet(jarURL).execute { response ->
                 if (!response.status.isSuccess())
                     throw UserError("$jarURL returns error code: ${response.status}")
 
-                val fileName = getFileName(jarURL, response)
-                callback(fileName, response.bodyAsChannel())
+                callback(getFileName(Url(jarURL), response), response.bodyAsChannel())
             }
         }
     }

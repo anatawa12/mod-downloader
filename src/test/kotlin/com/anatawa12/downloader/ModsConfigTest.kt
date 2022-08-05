@@ -52,7 +52,7 @@ class ModsConfigTest : DescribeSpec() {
             it("curse") {
                 test("mod fixrtm from curse fixrtm\n" +
                         "    version 3522183 (2.0.20)").list shouldBe listOf(
-                    ModInfo("fixrtm", CurseMod("fixrtm"), "3522183", "2.0.20")
+                    ModInfo("fixrtm", CurseMod("fixrtm", null), "3522183", "2.0.20")
                 )
             }
             it("url") {
