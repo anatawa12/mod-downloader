@@ -294,7 +294,24 @@ class ModsConfig(
                 else -> error("unexpected mod source kind: '$kind'")
             }
 
-        private fun parseCurseModSource(): CurseMod = CurseMod(getKeywordOrQuotedAndMove())
+        private fun parseCurseModSource(): CurseMod {
+            val slug = getKeywordOrQuotedAndMove()
+            var fileName: String? = null
+
+            while (true) {
+                if (kind() != TokenKind.Keyword) break
+                when (text()?.lowercase()) {
+                    "filename" -> {
+                        kind = null
+                        fileName = getKeywordOrQuotedAndMove()
+                    }
+
+                    else -> break
+                }
+            }
+
+            return CurseMod(slug, fileName)
+        }
 
         private fun parseUrlModSource(): URLPattern = URLPattern(getKeywordOrQuotedAndMove())
 
@@ -404,7 +421,7 @@ class ModsConfig(
         ): T
     }
 
-    data class CurseMod(val slug: String) : SingleJarModSource() {
+    data class CurseMod(val slug: String, val fileName: String?) : SingleJarModSource() {
         override suspend fun <T> doDownloadSingleJar(
             client: HttpClient,
             info: ModInfo,
@@ -433,20 +450,23 @@ class ModsConfig(
 
             logger.log("fetching download url for ${info.id}")
 
-            val fileInfo = projectInfo.files.firstOrNull { it.id.toString() == info.versionId }
-                ?: throw UserError("version ${info.versionId} not found in $slug (${projectInfo.id})")
+            val fileName = projectInfo.files.firstOrNull { it.id.toString() == info.versionId }?.name
+                ?: fileName
+                ?: throw UserError(
+                    "version ${info.versionId} not found in $slug (${projectInfo.id})\n" +
+                            "Please tell server administer to update mods config filename."
+                )
 
             val versionId = info.versionId
             val jarURL = "https://edge.forgecdn.net/files/" +
                     versionId.chunked(4).joinToString("/") + "/" +
-                    fileInfo.name.encodeURLPath()
+                    fileName.encodeURLPath()
 
             return client.prepareGet(jarURL).execute { response ->
                 if (!response.status.isSuccess())
                     throw UserError("$jarURL returns error code: ${response.status}")
 
-                val fileName = getFileName(Url(jarURL), response)
-                callback(fileName, response.bodyAsChannel())
+                callback(getFileName(Url(jarURL), response), response.bodyAsChannel())
             }
         }
     }
