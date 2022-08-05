@@ -2,7 +2,7 @@ package com.anatawa12.downloader
 
 import io.ktor.client.*
 import io.ktor.client.call.*
-import io.ktor.client.features.cookies.*
+import io.ktor.client.plugins.cookies.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -411,13 +411,16 @@ class ModsConfig(
             logger: Logger,
             callback: suspend (String, ByteReadChannel) -> T
         ): T {
-            val cfWidgetURL = URLBuilder("https://api.cfwidget.com/")
-                .path("minecraft", "mc-mods", slug)
-                .build()
+            val cfWidgetRequest = request {
+                url {
+                    takeFrom("https://api.cfwidget.com/")
+                    path("minecraft", "mc-mods", slug)
+                }
+            }
             val projectId = run {
                 while (true) {
                     logger.log("fetching project id and file info from cfwidget for ${info.id}")
-                    val resJson = client.get<String>(cfWidgetURL)
+                    val resJson = client.get(cfWidgetRequest).bodyAsText()
                     val res = Json.decodeFromString(CFWidgetResponse.serializer(), resJson)
                     if (res.id != null) return@run res.id
                     if (res.error != "in_queue")
@@ -430,18 +433,18 @@ class ModsConfig(
 
             logger.log("fetching download url for ${info.id}")
 
-            val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/")
-                .path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
-                .build()
+            val downloadURL = URLBuilder("https://addons-ecs.forgesvc.net/").apply {
+                path("api", "v2", "addon", projectId.toString(), "file", info.versionId, "download-url")
+            }.build()
 
-            val jarURL = client.get<ByteArray>(downloadURL).toString(Charsets.UTF_8).let(::Url)
+            val jarURL = client.get(downloadURL).body<ByteArray>().toString(Charsets.UTF_8).let(::Url)
 
-            return client.get<HttpStatement>(jarURL).execute { response ->
+            return client.prepareGet(jarURL).execute { response ->
                 if (!response.status.isSuccess())
                     throw UserError("$jarURL returns error code: ${response.status}")
 
                 val fileName = getFileName(jarURL, response)
-                callback(fileName, response.content)
+                callback(fileName, response.bodyAsChannel())
             }
         }
     }
@@ -478,7 +481,7 @@ class ModsConfig(
             var url: Url?
             url = Url("https://drive.google.com/uc?export=download&id=$id")
             while (true) {
-                val result = client.get<HttpStatement>(url!!) {
+                val result = client.prepareGet(url!!) {
                     val cookies = cookieStorage.get(url!!)
                     if (cookies.isNotEmpty()) {
                         headers[HttpHeaders.Cookie] = cookies.joinToString(";", transform = ::renderCookieHeader)
@@ -490,13 +493,13 @@ class ModsConfig(
                         runCatching { response.headers[HttpHeaders.ContentType]?.let(ContentType::parse) }.getOrNull()
                     if (contentType?.contentSubtype?.contains("html") != true) {
                         url = null
-                        return@execute callback(getFileName(response.request.url, response), response.content)
+                        return@execute callback(getFileName(response.request.url, response), response.bodyAsChannel())
                     } else {
                         val firstUrl = response.request.url
                         response.setCookie().forEach {
                             cookieStorage.addCookie(firstUrl, it)
                         }
-                        url = Url(findPublicURL(response.receive()))
+                        url = Url(findPublicURL(response.body()))
                         null
                     }
                 }
@@ -517,12 +520,12 @@ class ModsConfig(
             val url = urlPattern.replace("\$version", info.versionId)
             logger.log("fetching download url for ${info.id}: $url")
             val jarURL = Url(url)
-            return client.get<HttpStatement>(jarURL).execute { response ->
+            return client.prepareGet(jarURL).execute { response ->
                 if (!response.status.isSuccess())
                     throw UserError("$jarURL returns error code: ${response.status}")
 
                 val fileName = getFileName(jarURL, response)
-                callback(fileName, response.content)
+                callback(fileName, response.bodyAsChannel())
             }
         }
     }
@@ -539,7 +542,7 @@ class ModsConfig(
                 .apply { parameters["f"] = "OptiFine_${info.versionId}.jar" }
                 .build()
             logger.log("fetching download url for optifine ${info.versionId}")
-            val resHTML = client.get<String>(adloadx)
+            val resHTML = client.get(adloadx).bodyAsText()
 
             val aLine = resHTML.lineSequence()
                 .dropWhile { !it.contains("class=\"downloadButton\"") }
@@ -556,12 +559,12 @@ class ModsConfig(
             val jarURL = URLBuilder(adloadx).takeFrom(href).build()
             logger.log("downloading optifine: $jarURL")
 
-            return client.get<HttpStatement>(jarURL).execute { response ->
+            return client.prepareGet(jarURL).execute { response ->
                 if (!response.status.isSuccess())
                     throw UserError("$jarURL returns error code: ${response.status}")
 
                 val fileName = getFileName(jarURL, response)
-                val content = response.content
+                val content = response.bodyAsChannel()
                 val result = ByteChannel(false)
 
                 // check jar header.
