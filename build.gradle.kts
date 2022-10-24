@@ -21,13 +21,13 @@ dependencies {
     implementation("io.ktor:ktor-io")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.3")
 
-    testImplementation(platform("io.kotest:kotest-bom:5.4.1"))
+    testImplementation(platform("io.kotest:kotest-bom:5.5.2"))
     testImplementation("io.kotest:kotest-framework-api")
     testImplementation("io.kotest:kotest-assertions-core")
 
     testImplementation("io.mockk:mockk:1.12.5")
 
-    testRuntimeOnly(platform("io.kotest:kotest-bom:5.2.1"))
+    testRuntimeOnly(platform("io.kotest:kotest-bom:5.5.2"))
     testRuntimeOnly("io.kotest:kotest-runner-junit5")
 }
 
