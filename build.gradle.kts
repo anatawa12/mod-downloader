@@ -15,7 +15,7 @@ repositories {
 
 dependencies {
     implementation(kotlin("stdlib"))
-    implementation(platform("io.ktor:ktor-bom:2.0.3"))
+    implementation(platform("io.ktor:ktor-bom:2.1.3"))
     implementation("io.ktor:ktor-client-core")
     implementation("io.ktor:ktor-client-cio")
     implementation("io.ktor:ktor-io")
