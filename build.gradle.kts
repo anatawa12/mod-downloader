@@ -19,7 +19,7 @@ dependencies {
     implementation("io.ktor:ktor-client-core")
     implementation("io.ktor:ktor-client-cio")
     implementation("io.ktor:ktor-io")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.3.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.5.0")
 
     testImplementation(platform("io.kotest:kotest-bom:5.4.1"))
     testImplementation("io.kotest:kotest-framework-api")
